@@ -133,18 +133,61 @@ def test_stall_watchdog_counts_filled_holes_as_progress(monkeypatch, tmp_path):
 
 
 def test_up_exposes_a_direct_tcp_port_beside_the_proxied_ones(monkeypatch, tmp_path):
-    """The fallback when the HTTP proxy fails (Steering 2026-11-20 23:21Z): `--tcp-port 8765` adds 8765/tcp."""
+    """The fallback when the HTTP proxy fails (Steering 2026-11-20 23:21Z): `--tcp-port 8766` adds 8766/tcp."""
     bodies = []
     monkeypatch.setattr(rp, "call", lambda method, path, body=None: bodies.append(body) or {"id": "p1", "cost": 1.0})
     monkeypatch.setattr(rp, "POD_DIR", str(tmp_path))
     rp.up(SimpleNamespace(model="m/x", gpu=["G1"], cloud="SECURE", max_len=8192, vllm_args="", name="t",
-                          port=[8765], tcp_port=[8765], ttl_hours=0.1, stall_s=180))
-    assert bodies[0]["ports"] == ["8000/http", f"{rp.AGENT_PORT}/http", "8765/http", "8765/tcp"]
+                          port=[8765], tcp_port=[8766], ttl_hours=0.1, stall_s=180))
+    assert bodies[0]["ports"] == ["8000/http", f"{rp.AGENT_PORT}/http", "8765/http", "8766/tcp"]
 
 
-def test_ports_prints_the_pods_ip_and_port_fields(monkeypatch, capsys):
-    pod = {"id": "p1", "publicIp": "1.2.3.4", "portMappings": {"8765": 40123}, "name": "asiimov-x", "cost": 1}
+def test_up_refuses_one_port_exposed_both_ways(monkeypatch, tmp_path):
+    """L42: 8765/http with 8765/tcp left neither route reachable (aipt4, 2026-11-22). Refused before any call."""
+    monkeypatch.setattr(rp, "call", lambda *a, **k: pytest.fail("no pod may start"))
+    with pytest.raises(SystemExit, match="both http and tcp"):
+        rp.up(SimpleNamespace(model="m/x", gpu=["G1"], cloud="SECURE", max_len=8192, vllm_args="", name="t",
+                              port=[8765], tcp_port=[8765], ttl_hours=0.1, stall_s=180))
+
+
+def test_ports_reads_the_tcp_mapping_from_runtime(monkeypatch, capsys):
+    """REST v2's shape, as a running pod returned it on 2026-11-22."""
+    pod = {"id": "p1", "ports": ["8000/http", "8765/http", "8766/tcp"], "runtime": {"ports": [
+        {"ip": "100.65.33.33", "private": 8000, "public": 60196, "type": "http"},
+        {"ip": "103.207.149.154", "private": 8766, "public": 10239, "type": "tcp"}]}}
     monkeypatch.setattr(rp, "call", lambda method, path, body=None: pod)
     rp.ports(SimpleNamespace(pod="p1"))
-    out = capsys.readouterr().out
-    assert "1.2.3.4" in out and "40123" in out and "asiimov-x" not in out
+    assert capsys.readouterr().out.strip() == "8766/tcp -> ws://103.207.149.154:10239/"
+
+
+def test_ports_says_when_there_is_no_mapping_yet(monkeypatch, capsys):
+    monkeypatch.setattr(rp, "call", lambda method, path, body=None: {"id": "p1", "ports": ["8766/tcp"]})
+    rp.ports(SimpleNamespace(pod="p1"))
+    assert "no tcp mapping yet" in capsys.readouterr().out
+
+
+def test_tcp_relay_carries_bytes_both_ways():
+    import asyncio
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("tcp_relay", os.path.join(os.path.dirname(__file__), "..", "scripts", "tcp_relay.py"))
+    relay = iu.module_from_spec(spec)
+    spec.loader.exec_module(relay)
+
+    async def run():
+        async def echo(r, w):
+            w.write(b"pong:" + await r.read(100))
+            await w.drain()
+            w.close()
+        target = await asyncio.start_server(echo, "127.0.0.1", 0)
+        tport = target.sockets[0].getsockname()[1]
+        front = await asyncio.start_server(lambda r, w: relay.handle(r, w, tport), "127.0.0.1", 0)
+        fport = front.sockets[0].getsockname()[1]
+        r, w = await asyncio.open_connection("127.0.0.1", fport)
+        w.write(b"ping")
+        await w.drain()
+        got = await asyncio.wait_for(r.read(100), 5)
+        w.close()
+        front.close()
+        target.close()
+        return got
+    assert asyncio.run(run()) == b"pong:ping"
