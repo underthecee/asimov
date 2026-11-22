@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub's merge queue tests main plus the queued PRs as one commit before it lands; a required check
+  # that doesn't run on this event never reports there, and the queue waits until it times out.
+  merge_group:
 env:
   # The same pinned build as the cloud environment's setup script. Each SHA-512 is that file's line in the
   # release's own SHA512-SUMS.txt (github.com/godotengine/godot/releases/tag/4.3-stable).

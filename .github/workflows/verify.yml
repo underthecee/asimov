@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:  # the merge queue's commit (main plus the queued PRs); see test.yml
 # This job runs the PR's own code (verification/ and asiimov/), so it gets no write access and no secrets.
 permissions:
   contents: read

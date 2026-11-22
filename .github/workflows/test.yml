@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub's merge queue tests main plus the queued PRs as one commit before it lands; a required check
+  # that doesn't run on this event never reports there, and the queue waits until it times out.
+  merge_group:
 jobs:
   test:
     runs-on: ubuntu-latest
