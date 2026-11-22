@@ -36,9 +36,9 @@ from collections import defaultdict
 from . import inhabitant, narrate, persist
 from .llm import SCHEMAS
 from .minds import NoisyMind, ScriptMind, StubMind
-from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, TALK_DEFAULTS, TALK_MOVES,
+from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
                   TICKS_PER_DAY)
-from .worldmap import position
+from .worldmap import bounds, on_map, place_at
 
 PROTOCOL = 2               # 2 adds the inhabitant scope (plan/player-body-spec.md)
 SCOPES = ("god", "inhabitant")
@@ -175,7 +175,18 @@ class LiveRunner:
         return {"fire": {"family": [0, len(self.sim.state["families"]) - 1]},
                 "possess": {"agent": [0, n - 1]}, "release": {},
                 "act": {"action": list(PLAYER_ACTIONS), "target": [0, n - 1],
-                        "place": sorted(self.sim.map["places"])}}  # place: go_to's, and only go_to's
+                        "place": sorted(self.sim.map["places"]),  # place: go_to's, and only go_to's
+                        "to": bounds(self.sim.map)}}  # to: walk's tile, within [x0, y0, x1, y1] (walk-1)
+
+    def pulls(self, m: dict) -> bool:
+        """Whether an inhabitant's act that waits for the next tick pulls that tick forward. Every act does
+        but a walk within its place or within the open (walk-1): only a step that takes the body into or out
+        of a place changes whom it is with, so the rest ride the pace and a held key doesn't speed the world."""
+        args = m.get("args") if isinstance(m.get("args"), dict) else {}
+        held = self.sim.state.get("player", {}).get("agent")
+        if args.get("action") not in WALK_ACTS or held is None or not on_map(self.sim.map, args.get("to")):
+            return True
+        return place_at(self.sim.map, args["to"]) != self.sim.state["agents"][held]["place"]
 
     def _held_agent(self) -> int | None:
         return self._held_from()[0]
@@ -257,9 +268,11 @@ class LiveRunner:
         else:
             t, place, text = args.get("target"), args.get("place"), args.get("text")
             go, say = args.get("action") in GO_ACTS, args.get("action") in SAY_ACTS
+            walk, to = args.get("action") in WALK_ACTS, args.get("to")  # walk-1: a tile, and nothing else
             move, price = args.get("move"), args.get("price")  # talk-1: the chip on a say, and a buy's shown price
-            ok = set(args) <= {"action", "target", "place", "text", "move", "price"} \
+            ok = set(args) <= {"action", "target", "place", "text", "move", "price", "to"} \
                 and isinstance(args.get("action"), str) \
+                and (to is not None) == walk and (not walk or (t is None and on_map(self.sim.map, to))) \
                 and ((move is None and price is None) or say and isinstance(move, str) and move in TALK_MOVES
                      and (move == "wants_to_buy_food") == (price is not None)
                      and (price is None or _is_int(price) and price >= 0)) \
@@ -273,6 +286,8 @@ class LiveRunner:
                 {"kind": "act", "action": args.get("action"), "target": t}
             if go:
                 act["place"] = place
+            if walk and ok:
+                act["to"] = list(to)
             if say:
                 act["text"] = text
             if move is not None:
@@ -480,11 +495,10 @@ class LiveRunner:
     def view(self) -> dict:
         """Every villager at the current view tick, with the engine's own position."""
         sim, tick = self.sim, self.sim.state["tick"]
-        places = sim.map["places"]
         agents = []
         for a in sim.state["agents"]:
             r = a["route"]
-            pos = places[a["place"]]["anchor"] if r is None else position(r, places[r["to"]]["anchor"], tick)
+            pos = sim._pos(a)  # walk-1: a body the player walked stands on its own tile
             agents.append({"id": a["id"], "place": a["place"], "activity": a["activity"], "asleep": a["asleep"],
                            "pos": list(pos), "route": None if r is None else
                            {"from": r["from"], "to": r["to"], "depart": r["depart"], "arrive": r["arrive"]}})
@@ -727,7 +741,7 @@ class Hub:
             self.waiters[m["id"]] = conn  # if it waits for the next tick, that step's acks answer it
 
         def send(ack, evs):
-            loop.call_soon_threadsafe(self._early_ack, conn, ack, evs)
+            loop.call_soon_threadsafe(self._early_ack, conn, ack, evs, m)
         self.runner.queue_late(m, conn.name, conn.scope, send)
 
     def _early_scheduled(self, iid: str, ack: dict, evs: list):
@@ -737,9 +751,9 @@ class Hub:
         if conn is not None and loop is not None:
             loop.call_soon_threadsafe(self._early_ack, conn, ack, evs)
 
-    def _early_ack(self, conn: "Conn", ack, evs: list):
-        if ack is None:
-            self.pull = True  # it waits for the next tick: pull that one forward
+    def _early_ack(self, conn: "Conn", ack, evs: list, m: dict | None = None):
+        if ack is None:  # it waits for the next tick: pull that one forward (a walk only if it changes place)
+            self.pull = self.pull or m is None or self.runner.pulls(m)
             return
         if ack.get("id") is not None:
             self.waiters.pop(ack["id"], None)
@@ -769,7 +783,7 @@ class Hub:
                 ack = self.runner.submit(m, client=conn.name, scope=conn.scope)
                 if ack is None:
                     self.waiters[m["id"]] = conn
-                    if conn.scope == "inhabitant" and m.get("verb") == "act":
+                    if conn.scope == "inhabitant" and m.get("verb") == "act" and self.runner.pulls(m):
                         self.pull = True
                 else:
                     conn.send(ack)
@@ -854,7 +868,7 @@ class Hub:
             for m, client, scope, _ in self.runner.leftover_late():  # came as the fixed point closed
                 ack = self.runner.submit(m, client=client, scope=scope)
                 if ack is None:
-                    self.pull = True
+                    self.pull = self.pull or self.runner.pulls(m)
                 else:
                     c = self.waiters.pop(ack["id"], None) if isinstance(ack.get("id"), str) else None
                     if c:
