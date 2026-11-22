@@ -1,0 +1,35 @@
+name: guard
+# pull_request_target runs THIS file as it is on the base branch, so a PR can't edit the guard that judges it
+# (under pull_request a PR runs its own copy of this workflow). The PR's code is never checked out, executed,
+# imported or installed here: the base is checked out, the PR head is fetched as git objects only, and the
+# base's scripts/pr_guard.py reads them with git and ast.parse. No secrets are used; the token is read-only.
+# The PR that first adds this file and scripts/pr_guard.py gets no guard run (the base has neither yet).
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Protected paths, golden/engine changes and test weakening (the base's scripts/pr_guard.py)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Fail closed: no guard on the base means no pass (never fall back to the PR's copy).
+          test -f scripts/pr_guard.py || { echo "::error::base has no scripts/pr_guard.py"; exit 1; }
+          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          git cat-file -e "${HEAD_SHA}^{commit}" || { echo "::error::PR head ${HEAD_SHA} not fetched (pushed again?)"; exit 1; }
+          python -I scripts/pr_guard.py --base "$BASE_SHA" --head "$HEAD_SHA" --repo .

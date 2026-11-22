@@ -1,0 +1,35 @@
+name: verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:  # the merge queue's commit (main plus the queued PRs); see test.yml
+# This job runs the PR's own code (verification/ and asiimov/), so it gets no write access and no secrets.
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The versions the gate was developed and passed with (verification/README.md).
+      - run: pip install pytest==9.2.0 hypothesis==6.170.15 jsonschema==4.26.0 z3-solver==5.4.1.0
+      - name: Rng.draw / Rng.at gate (fails on a nonzero exit or a receipt whose status is not pass)
+        run: |
+          out="$(mktemp -d "$RUNNER_TEMP/verify.XXXXXX")"
+          echo "VERIFY_OUT=$out" >> "$GITHUB_ENV"
+          set +e
+          python verification/run.py --out "$out"
+          rc=$?
+          set -e
+          python -c 'import json, sys; r = json.load(open(sys.argv[1])); print("receipt status:", r["status"]); sys.exit(0 if r["status"] == "pass" and r["checks_all_passed"] is True else 1)' "$out/receipt.json"
+          test "$rc" -eq 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-receipt
+          path: ${{ env.VERIFY_OUT }}/receipt.json
+          if-no-files-found: warn
