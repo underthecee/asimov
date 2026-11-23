@@ -118,7 +118,7 @@ def known_people(agent: dict, state: dict) -> set[int]:
             by_first.setdefault(first, []).append((o["id"], words, pattern))
     for text in list(agent["recent"]) + [e["text"] for e in agent["episodes"]]:
         present = set(re.findall(r"\w+", text))
-        for first in present & by_first.keys():
+        for first in present & by_first.keys():  # lint: allow rng -- only adds to the set known: order-free
             known.update(i for i, words, pattern in by_first[first]
                          if i not in known and words <= present and pattern.search(text))
         known.update(i for i, pattern in wordless if pattern.search(text))
