@@ -33,15 +33,12 @@ import time
 from collections import deque
 
 from .inhabitant import present_ids
-from .sim import TICKS_PER_DAY, TRADE_INPUT, clip_reply
-
-ASK_ACTS = ("ask_kin", "ask_food", "buy_from")
-REFUSALS = ("refused", "kin refused", "nothing to spare", "kin has nothing to spare")
+from .sim import ASK_NOS as REFUSALS, ASK_STEPS as ASK_ACTS, TICKS_PER_DAY, TRADE_INPUT, clip_reply
+from .verbs import SEEN, told
 MAX_CHARS = 120
 MAX_LINES = 2
 # What a speaker is visibly doing (E2b, Steering 10:09Z): the player sees this anyway.
-DOING = {"work": "at work", "socialize": "passing the time", "home": "at home", "rest": "resting",
-         "explore": "wandering", "shop": "shopping for food", "sleep": "getting ready for bed"}
+DOING = SEEN  # verbs-1: each activity's `seen` words in the verb table
 
 # What each place holds, said outright (E2c): the world has only "food", one stock at the market, no stalls.
 VILLAGE = ("The village has a market, a field, a workshop, a plaza, the woods and the families' homes. "
@@ -81,6 +78,7 @@ JUST_TURNED_DOWN = 6  # ticks (an hour): a refusal this recent may color a speak
 # Topic weights (E2d): what touches the other speaker or the listener first, then what stands out, then a
 # purchase, then routine trade (trade-1's inputs), which an exchange gets at most one of.
 TOUCH, STANDOUT, BUY, ROUTINE = 3, 2, 1, 0
+WEIGHT = {"standout": STANDOUT, "buy": BUY, "routine": ROUTINE}  # the verb table's names for them (words.told)
 
 
 def greeting(hour: int) -> str:
@@ -140,31 +138,16 @@ class Recent:
             act, why, to = d.get("action"), d.get("why"), d.get("to")
             who = name(to) if isinstance(to, int) else None
             t, w = None, STANDOUT
-            if (act in ("ask_kin", "ask_food", "buy_from") and why in
-                    ("kin refused", "kin has nothing to spare", "refused", "nothing to spare")):
+            if act in ASK_ACTS and why in REFUSALS:
                 self.refused[a] = e.tick
-            if act == "buy_food" and why == "bought":
-                w = BUY
-                t = f"{name(a)} bought food at the market"
-            elif act == "buy_food" and why == "no coin":
-                t = f"{name(a)} hadn't the coin to buy food"
-            elif act == "ask_kin" and why == "kin gave food":
-                t = f"{who} in {name(a)}'s family gave them food" if who else f"{name(a)}'s family gave them food"
-            elif act == "ask_kin" and why in ("kin refused", "kin has nothing to spare"):
-                t = f"{name(a)} asked {who or 'their family'} for food and got none"
-            elif act in ("ask_food", "buy_from") and who and why in ("gave", "sold"):
-                t = f"{who} gave {name(a)} food when asked" if act == "ask_food" else f"{name(a)} bought food from {who}"
-                w = STANDOUT if act == "ask_food" else BUY
-            elif act in ("ask_food", "buy_from") and who and why in ("refused", "nothing to spare"):
-                t = f"{name(a)} asked {who} for food and was turned down"
-            elif act == "give_food" and who and why == "gave":
-                t = f"{name(a)} gave food to {who}"
-            elif act == "give_coin" and who and why == "gave":
-                t = f"{name(a)} gave coin to {who}"
-            elif act == "trade" and who and why == "supplied":
-                self.due.pop(a, None)
-                t = f"{name(a)} got {TRADE_INPUT.get(agents[to]['role'], 'goods')} from {who}, the {agents[to]['role']}"
-                w = ROUTINE
+            line = told(act, why)  # verbs-1: the verb's own line for this outcome, from the verb table
+            if line and (who or "{who}" not in line[1] or line[2]):
+                if act == "trade":
+                    self.due.pop(a, None)
+                role = agents[to]["role"] if who else ""
+                t = (line[1] if who or line[2] is None else line[2]).format(
+                    a=name(a), who=who, role=role, goods=TRADE_INPUT.get(role, "goods"))
+                w = WEIGHT[line[0]]
             if t:
                 q = self.by.setdefault(a, deque(maxlen=8))
                 if not q or q[-1][1] != t:

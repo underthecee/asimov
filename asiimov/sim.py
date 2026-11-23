@@ -30,11 +30,15 @@ from .memory import (REFLECT_ASK, assemble_decide, assemble_prompt, is_bare_valu
 from .minds import MindRequest, ReplayDivergence, dispatch
 from .params import generate_population
 from .rng import Rng
+from .verbs import (ACTIVITIES, ANSWER_ACTS, ASK_STEPS, DELIBERATE_ACTIONS, GIFTS, GO_ACTS, HAIL_ACTS, INSTANT_STEPS, MINUTE,
+                    PERSON_STEPS, PLAYER_ACTIONS, RATED_ACTS, REACH_STEPS, RULE_STEPS, SAY_ACTS, STEP_DOS, VERBS,
+                    WALK_ACTS, cost as verb_cost, menu as verb_menu)
 from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, tile_at, travel_ticks
 
 TICKS_PER_DAY = 144
 SUB = 600  # time-1a (B2.1): an act's time inside its tick, f, counts 600ths of a tick, which are sim-seconds
-COST = SUB // 10  # time-1b (B2.3): what an act costs the body, one sim-minute, until verbs-1's table; words are free
+COST = SUB // 10  # time-1b (B2.3): a sim-minute, the unit of an act's cost to the body (its row in verbs.py); words are free
+assert COST == MINUTE
 VILLAGE_WAKE_MIN = 390  # 06:30
 FOOD_PRICE = 3
 FARMER_SELL_PRICE = 2
@@ -50,18 +54,15 @@ WORKPLACE = {"farmer": "field", "crafter": "workshop", "trader": "market",
              "healer": "plaza", "guard": "plaza", "child": "plaza", "elder": "plaza"}
 # What a plan block can say. "shop" (engine 7) goes to the market and buys on arrival, so buying food
 # can be planned: at engine 6 it took a hunger crisis, and 13 of 22 4B guard-days had none.
-ACTIVITIES = ("work", "socialize", "home", "rest", "explore", "shop")
+# verbs-1 (B4): these lists are read from the verb table (verbs.py), each the literal it was, in its order.
 ACTIVITY_PLACE = {"socialize": "plaza", "shop": "market", "explore": "woods"}  # work: WORKPLACE; else home
 # Intent steps (engine 7). Person steps name a target. seek, give_* and avoid move the agent; ask_kin,
 # ask_food, buy_from and steal act on the tick the step starts, where the agent already is.
-PERSON_STEPS = ("seek", "avoid", "give_food", "give_coin", "ask_kin", "ask_food", "buy_from", "steal")
-STEP_DOS = ACTIVITIES + PERSON_STEPS
-INSTANT_STEPS = ("ask_kin", "ask_food", "buy_from", "steal")
-ANSWER_ACTS = ("agree", "decline")  # the player's answer to an ask aimed at its body (player-ask-1)
+# (verbs.py: PERSON_STEPS, STEP_DOS, INSTANT_STEPS; ANSWER_ACTS, the player's answer to an ask aimed at its body
+# (player-ask-1); RATED_ACTS, player acts that roll or buy, held to the deliberation cooldown; RULE_STEPS, person
+# steps only a rule sets, never a mind (trade-1), so in no reply schema; REACH_STEPS, which go where the target
+# is, then act when both are there.)
 ASK_WAIT_TICKS = 6  # an unanswered ask is answered by the body's own nature after this many ticks (an hour)
-RATED_ACTS = INSTANT_STEPS + ("buy_food",)  # player acts that roll or buy: held to the deliberation cooldown
-RULE_STEPS = ("trade",)  # person steps only a rule sets, never a mind (trade-1), so in no reply schema
-REACH_STEPS = ("seek", "give_food", "give_coin", "trade")  # trade: DEP-a's rule step, never a mind's  # go where the target is, then act when both are there
 WAIT_STEPS = REACH_STEPS + ("shop",)  # steps that wait to arrive somewhere, and fail if their time runs out
 STEP_TICKS = {"avoid": 24}  # how long a step lasts (activities, avoid) or may take to get done (the rest)
 DEFAULT_STEP_TICKS = 18     # 3 hours
@@ -69,7 +70,6 @@ MAX_STEPS = 4
 # A person who can't or won't give doesn't end an intent whose ask was not its last step: the intent moves
 # on (steering, T19 world A: refusals are common by design, and ending on them cut intents spanning a day
 # from 0.269 to 0.171). A caught steal or any other failure still ends it.
-ASK_STEPS = ("ask_food", "buy_from", "ask_kin")
 ASK_NOS = ("nothing to spare", "refused", "kin refused", "kin has nothing to spare")
 GIFT_COIN = FOOD_PRICE      # give_coin hands over one meal's price: Sim._gift_coin, which reads the live price
 DAILY_MIND_CALLS = 15       # per agent and calendar day, plans and reflections included
@@ -95,8 +95,7 @@ OCCASIONS = {  # why a deliberation was asked, as its situation says it
 # here and awake; it reaches that villager's memory and its next deliberation, which answers in words (the
 # reply's reason, emitted as a `reply` event) and with an act. Spoken answers skip the deliberation cooldown
 # and get SPOKEN_CALLS more calls a day than the usual cap, so a talk isn't met with silence.
-SAY_ACTS = ("say",)
-SAY_MAX = 140
+SAY_MAX = 140  # (SAY_ACTS: verbs.py)
 REPLY_MIN_SENTENCE = 93  # say-3c: a clipped reply backs up to a sentence end only if this much is kept
 
 
@@ -243,7 +242,6 @@ def decide_ask(name: str, move: str, price, think: int = 0) -> str:
 ID_REF = re.compile(r"#(\d+)\b")
 
 
-GIFTS = ("give_food", "give_coin")
 TALK_BARRED = GIFTS + ("steal",)  # say-2 (Steering 08:30Z): in a talk window, neither a gift to the speaker nor a theft
 # The sick ask's own clauses and tail, as piloted (B5, pack sha 163da069...c5b5): rewording needs a new pilot.
 SICK_ACTIONS = ("work", "home")
@@ -257,45 +255,26 @@ NEIGHBOR_ACTIONS = ("visit", "help", "keep_away", "carry_on")
 # What a deliberation may answer, in the order its prompt lists them (engine 10). Only the ones that can
 # work now are offered (_offer): with impossible ones listed, 63% of 4B famine answers chose buy_food away
 # from the market or facing an empty one (T16e), and cutting them sent minds to people instead (T16f).
-DELIBERATE_ACTIONS = ("buy_food", "go_market", "ask_kin", "ask_food", "buy_from", "steal", "give_food", "give_coin",
-                      "seek", "avoid", "work", "socialize", "home", "rest", "explore", "wait")
-# One factual clause per offered action, no trait or value words (L11); T16e's wording where it exists.
-# Deliberate-only wording lives in the situation, not the shared SCHEMA (L11).
-ACTION_CLAUSES = {
-    "buy_food": "buy_food buys food if you are at the market, carry enough coin and it has some",
-    "go_market": "go_market takes you to the market, where you can buy food if you carry enough coin and it has some",
-    "ask_kin": "ask_kin asks a family member here for 1 food",  # "here" since the map's place check
-    "ask_food": "ask_food asks a person here for 1 food; they may say no",
-    "buy_from": f"buy_from offers a person here {FOOD_PRICE} coin for 1 food; they may say no",  # see action_clauses
-    "steal": "steal tries to take 1 food from a person here, and you may be caught",
-    "give_food": "give_food hands them 1 food",
-    "give_coin": f"give_coin hands them {GIFT_COIN} coin",
-    "seek": "seek finds a person and talks with them",
-    "avoid": "avoid keeps you away from them",
-    "work": "work goes to your work for a few hours",
-    "socialize": "socialize spends a few hours with others",
-    "home": "home takes you home for a few hours",
-    "rest": "rest lasts a few hours",
-    "explore": "explore lasts a few hours",
-    "wait": "wait does nothing for now",
-}
-assert set(ACTION_CLAUSES) == set(DELIBERATE_ACTIONS)
-GO_ACTS = ("go_to",)  # the player walks its body to a named place and stays a while (go-to-1); never a mind's
-WALK_ACTS = ("walk",)  # the player steps its body to a tile, at most WALK tiles a tick (walk-1); never a mind's
-HAIL_ACTS = ("hail",)  # the player calls to a villager walking by within sight, who stops (reach-1); never a mind's
-PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS + WALK_ACTS + HAIL_ACTS  # what a player's act may name
+# (DELIBERATE_ACTIONS: verbs.py, the rows a mind may choose that have a menu line.)
+# One factual clause per offered action, no trait or value words (L11); T16e's wording where it exists. The
+# clauses are the rows' `menu` words (verbs.menu), here at the base price.
+ACTION_CLAUSES = verb_menu(FOOD_PRICE)
+assert set(ACTION_CLAUSES) == set(DELIBERATE_ACTIONS) and GIFT_COIN == FOOD_PRICE
+# (verbs.py, the player's alone and never a mind's: GO_ACTS, the player walks its body to a named place and
+# stays a while (go-to-1); WALK_ACTS, it steps its body to a tile (walk-1); HAIL_ACTS, it calls to a villager
+# walking by within sight, who stops (reach-1). PLAYER_ACTIONS: what a player's act may name.)
 
 
 def act_cost(action: str) -> int:
-    """How long a player's act holds the body, in SUBths of a tick (time-1b, B2.3): COST for every act until
-    verbs-1's table, and nothing for words, an answer to an ask, or a walk (which walking speed bounds)."""
-    return 0 if action in SAY_ACTS + ANSWER_ACTS + WALK_ACTS + HAIL_ACTS else COST
+    """How long a player's act holds the body, in SUBths of a tick (time-1b, B2.3): its row's cost in the verb
+    table (verbs-1), a sim-minute for most and nothing for words, an answer to an ask, a call, or a walk (which
+    walking speed bounds)."""
+    return verb_cost(action)
 
 
 def action_clauses(price: int) -> dict:
     """ACTION_CLAUSES at a food price: the two clauses that name coin say the live price (B5 year-1)."""
-    return {**ACTION_CLAUSES, "buy_from": f"buy_from offers a person here {price} coin for 1 food; they may say no",
-            "give_coin": f"give_coin hands them {price} coin"}
+    return verb_menu(price)
 NO_COIN_LINE = " You have too little coin to buy food."  # why buy_food, go_market and buy_from are withheld
 
 
@@ -317,7 +296,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "43"  # 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "verbs-1"  # verbs-1: every verb is one row of a table (asiimov/verbs.py: who may use it, what it names, what it needs, its cost, its words, its handler) and the engine's lists, menu, cost and dispatch read it; a pure move, so the log and every prompt are byte-identical: only the engine field differs from 43. 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -2243,26 +2222,11 @@ class Sim:
             return self._sick_resolve(a, out, eid)
         action, target = out.get("action"), out.get("target")
         first = None
+        row = VERBS.get(action) if isinstance(action, str) else None  # verbs-1: the verb's row, if a mind may use it
         if action in TALK_BARRED and target in no_gift:
             self._receipt(a, eid, action, False, "not in talk")
-        elif action == "buy_food":
-            self._buy(a, eid)
-        elif action in INSTANT_STEPS:
-            err = self._target_error(a, target)
-            if err:
-                self._receipt(a, eid, action, False, err)
-            else:
-                self._person_act(a, action, target, eid)
-        elif action == "wait":
-            self._receipt(a, eid, action, True, "waited")
-        elif action == "go_market" or action in STEP_DOS:
-            do = "shop" if action == "go_market" else action
-            err = self._target_error(a, target) if do in PERSON_STEPS else None
-            if err:
-                self._receipt(a, eid, action, False, err)
-            else:
-                first = {"do": do, "target": target if do in PERSON_STEPS else None}
-                self._receipt(a, eid, action, True, "heading to market" if do == "shop" else "started")
+        elif row is not None and "mind" in row["who"]:
+            first = getattr(self, row["handler"])(a, eid, action, target)  # a step it starts, or None
         else:
             self._receipt(a, eid, str(action), False, "unparseable or unknown action")
         goal = out.get("goal").strip()[:120] if isinstance(out.get("goal"), str) else ""
@@ -2279,6 +2243,42 @@ class Sim:
                            "left": STEP_TICKS.get(steps[0]["do"], DEFAULT_STEP_TICKS)}
         elif first:
             a["override"] = {**first, "event": eid, "left": STEP_TICKS.get(first["do"], DEFAULT_STEP_TICKS)}
+
+    # verbs-1: the handlers the verb table names, each called as handler(body, act event, action, target). One
+    # a mind may use returns the step it starts (an override, or an intent's first step), or None.
+    def _do_buy(self, a: dict, eid: int, action: str, target):
+        self._buy(a, eid)
+
+    def _do_person(self, a: dict, eid: int, action: str, target):
+        err = self._target_error(a, target)
+        if err:
+            self._receipt(a, eid, action, False, err)
+        else:
+            self._person_act(a, action, target, eid)
+
+    def _do_wait(self, a: dict, eid: int, action: str, target):
+        self._receipt(a, eid, action, True, "waited")
+
+    def _do_step(self, a: dict, eid: int, action: str, target) -> dict | None:
+        do = VERBS[action]["starts"] or action  # go_market starts a shop step
+        err = self._target_error(a, target) if do in PERSON_STEPS else None
+        if err:
+            self._receipt(a, eid, action, False, err)
+            return None
+        self._receipt(a, eid, action, True, "heading to market" if do == "shop" else "started")
+        return {"do": do, "target": target if do in PERSON_STEPS else None}
+
+    def _do_answer(self, a: dict, eid: int, action: str, target):
+        return self._answer(a, eid, action, target)
+
+    def _do_go_to(self, a: dict, eid: int, action: str, target):
+        return self._go_to(a, eid, target)
+
+    def _do_say(self, a: dict, eid: int, action: str, target):
+        return self._say(a, eid, target)
+
+    def _do_hail(self, a: dict, eid: int, action: str, target):
+        return self._hail(a, eid, target)
 
     def _person_act(self, a: dict, action: str, target: int, eid: int) -> int:
         """ask_kin, ask_food, buy_from or steal, with a valid target id. Returns the receipt's event id."""
@@ -2781,14 +2781,9 @@ class Sim:
 
     def _apply_act(self, a: dict, eid: int, action: str, target, offer: list, people: list):
         """A player act, with the checks a mind's reply schema would have made, then the mind's own path."""
-        if action in ANSWER_ACTS:
-            return self._answer(a, eid, action, target)
-        if action in GO_ACTS:
-            return self._go_to(a, eid, target)
-        if action in SAY_ACTS:
-            return self._say(a, eid, target)
-        if action in HAIL_ACTS:
-            return self._hail(a, eid, target)
+        row = VERBS[action]
+        if "mind" not in row["who"]:  # the player's alone (an answer, go_to, a line, a call): held to no offer
+            return getattr(self, row["handler"])(a, eid, action, target)
         if action not in offer:
             self._receipt(a, eid, action, False, "not offered", extra={"offer": offer})
         elif action in PERSON_STEPS and target not in people:
