@@ -72,6 +72,8 @@ def session_whys() -> set[str]:
                     act["place"] = rng.choice(sorted(sim.map["places"]))
                 elif act["action"] in getattr(S, "SAY_ACTS", ()):  # say-1: a line to someone
                     act.update(target=rng.randrange(24), text="Good day to you.")
+                elif act["action"] in getattr(S, "WALK_ACTS", ()):  # walk-1: a step to a tile
+                    act["to"] = [rng.randint(-8, 8), rng.randint(-8, 8)]
                 elif rng.random() < 0.8:
                     act["target"] = rng.randrange(24)
                 acts = [act] * (2 if rng.random() < 0.05 else 1)

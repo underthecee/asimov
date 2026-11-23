@@ -4,6 +4,8 @@
 #   activity  {activity, place, arrive[, from]}  a walk when arrive > tick (from: where it starts; absent when
 #             the villager keeps its current walk), else already there
 #   arrive    {place}                            the walk ends
+#   moved     {from, pos, place}                 walk-1: the player walked its body to tile `pos`; `place` is the
+#             place holding that tile, or null in the open. It stands on that tile until a walk sets out
 # wake and sleep only change the activity. Position math is worldmap.position, in integer tiles, so at a
 # tick boundary this matches the engine exactly; tests/test_positions.gd checks it against Sim._pos.
 extends RefCounted
@@ -13,7 +15,8 @@ var walk := 40          # tiles per tick, from genesis
 var agents := []        # population agents, as in genesis
 var families := []
 var ticks_per_day := 144
-var moves := {}         # agent id -> [[tick, place, route, activity], ...]: state after that tick's events
+var moves := {}         # agent id -> [[tick, place, route, activity, at], ...]: state after that tick's events
+						# (at: the tile a walked body stands on, [x, y], or null at a place's anchor or on a route)
 var events := []        # every event received, in id order
 var last_tick := -1     # the newest tick with events applied
 var holdings := {}      # agent id -> [[tick, food, coin], ...]: what it holds after that tick ran. Only a playback
@@ -32,7 +35,7 @@ func load_world(world: Dictionary) -> void:
 	moves.clear()
 	holdings.clear()
 	for a in agents:
-		moves[int(a["id"])] = [[-1, families[int(a["family"])]["home"], null, "sleep"]]
+		moves[int(a["id"])] = [[-1, families[int(a["family"])]["home"], null, "sleep", null]]
 
 
 func add_event(e: Dictionary) -> void:
@@ -54,30 +57,33 @@ func add_event(e: Dictionary) -> void:
 					route = {"from": [int(d["from"][0]), int(d["from"][1])], "to": d["place"],
 							"depart": t, "arrive": arrive}
 				_put(aid, t, null, route, d["activity"])
-			else:
-				_put(aid, t, d["place"], null, d["activity"])
+			else:  # already there: a walked body keeps its tile within the place
+				var m = _last(aid)
+				_put(aid, t, d["place"], null, d["activity"], m[4] if m[1] == d["place"] else null)
 		"arrive":
 			var aid := int(e["actor"])
 			_put(aid, t, d["place"], null, _last(aid)[3])
+		"moved":
+			_put(int(e["actor"]), t, d["place"], null, "visit", [int(d["pos"][0]), int(d["pos"][1])])
 		"wake":
 			var aid := int(e["actor"])
 			var m = _last(aid)
-			_put(aid, t, m[1], m[2], "home")
+			_put(aid, t, m[1], m[2], "home", m[4])
 		"sleep":
 			var aid := int(e["actor"])
 			var m = _last(aid)
-			_put(aid, t, m[1], m[2], "sleep")
+			_put(aid, t, m[1], m[2], "sleep", m[4])
 
 
 func _last(aid: int) -> Array:
 	return moves[aid][-1]
 
 
-func _put(aid: int, t: int, place, route, activity) -> void:
+func _put(aid: int, t: int, place, route, activity, at = null) -> void:
 	var m: Array = moves[aid]
 	if m[-1][0] == t:
 		m.pop_back()  # only the last change in a tick is visible between ticks
-	m.append([t, place, route, activity])
+	m.append([t, place, route, activity, at])
 
 
 func load_file(path: String) -> String:
@@ -120,7 +126,7 @@ static func _at(rows: Array, view_tick: int) -> Array:
 
 
 func state_at(aid: int, view_tick: int) -> Array:
-	## [tick, place, route, activity] at view tick N.
+	## [tick, place, route, activity, at] at view tick N.
 	return _at(moves[aid], view_tick)
 
 
@@ -147,7 +153,7 @@ func position(aid: int, view_tick: int) -> Vector2i:
 	## The engine's position at a tick boundary (worldmap.position): WALK tiles a tick along the L path, x first.
 	var s := state_at(aid, view_tick)
 	if s[2] == null:
-		return anchor(s[1])
+		return Vector2i(int(s[4][0]), int(s[4][1])) if s[4] != null else anchor(s[1])
 	var r: Dictionary = s[2]
 	var to := anchor(r["to"])
 	var x := int(r["from"][0])

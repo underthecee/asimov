@@ -161,6 +161,7 @@ function describe(e) {
     case "day_rhythm": return `${a}'s next wake set for ${clock(d.wake_tick)}`;
     case "wake": return `${a} woke at ${esc(d.place)}`;
     case "sleep": return `${a} went to sleep (${esc(d.promoted)} memory kept${d.rejected ? `, ${esc(d.rejected)} rejected` : ""}${d.unknown_person ? `, ${esc(d.unknown_person)} named a stranger` : ""})`;
+    case "moved": return `${a} walked to ${esc(JSON.stringify(d.pos))}${d.place ? ` in ${esc(d.place)}` : ", out in the open"}`;
     case "activity": return `${a}: ${esc(d.activity)} at ${esc(d.place)}`;
     case "eat": return `${a} ate${Number.isInteger(d.household) ? ` from ${who(d.household)}'s household food` : ""}`;
     case "produce": return `${a} made ${d.food ? esc(d.food) + " food" : esc(d.coin) + " coin"}`;
@@ -278,13 +279,13 @@ function drawMap() {
     out += "</g>";
   }
   for (const [id, [, , act, from, to, depart]] of walking) {  // along the L path, x first, as the engine walks
-    if (!MAP || !from || !MAP[to]) continue;
-    const [tx, ty] = MAP[to].anchor; let [x, y] = from, left = V.map.walk * (S.t - depart);
+    if (!MAP || !from || (to !== null && !MAP[to])) continue;
+    const [tx, ty] = to === null ? from : MAP[to].anchor; let [x, y] = from, left = V.map.walk * (S.t - depart);  // to null: a player's body standing in the open
     const dx = Math.min(left, Math.abs(tx - x)); x += tx >= x ? dx : -dx;
     const dy = Math.min(left - dx, Math.abs(ty - y)); y += ty >= y ? dy : -dy;
     const c = roleColor(A[id].role);
     out += `<circle class="dot${S.agent === id ? " sel" : ""}" data-agent="${id}" cx="${OX + (x + 0.5) * TILE}" cy="${OY + (y + 0.5) * TILE}" r="3" fill="${c}">` +
-      `<title>${esc(A[id].name)} #${id} (${esc(A[id].role)}): ${esc(act)}, walking to ${esc(to)}</title></circle>`;
+      `<title>${esc(A[id].name)} #${id} (${esc(A[id].role)}): ${to === null ? "out in the open" : `${esc(act)}, walking to ${esc(to)}`}</title></circle>`;
   }
   svg.innerHTML = out;
 }
@@ -307,7 +308,7 @@ function paneAgent() {
   });
   return `<h2>${esc(a.name)} #${a.id}</h2>
     <div class="sub">${esc(a.role)}, age ${a.age}, ${esc(f.surname)} family (${f.members.filter(m => m !== a.id).map(who).join(", ") || "alone"}), home ${esc(f.home)}</div>
-    <div class="sub">now (${clock(S.t)}): <b>${esc(act)}</b> ${p === null ? `walking to ${esc(to)}` : `at ${esc(p)}`}</div>
+    <div class="sub">now (${clock(S.t)}): <b>${esc(act)}</b> ${p === null ? (to == null ? "out in the open" : `walking to ${esc(to)}`) : `at ${esc(p)}`}</div>
     <div class="traits">${tr}</div><div class="sub">${vals}</div>
     <div class="filters"><label><input type="checkbox" id="routine" ${S.showRoutine ? "checked" : ""}> show routine (moves, meals, work output)</label>
     <span class="sub">${evs.length} events; highlighted = latest at or before now</span></div>
