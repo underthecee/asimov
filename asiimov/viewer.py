@@ -13,7 +13,7 @@ A log whose genesis carries a map (asiimov/worldmap.py) is drawn as geography, w
 places; an older log is drawn as a schematic of named places.
 
 Where each villager is comes from the log alone: every place change is an emitted event (wake,
-activity, arrive, sleep), so `moves()` is exact for a complete log and needs no replay. Inventory and
+activity, arrive, moved, sleep), so `moves()` is exact for a complete log and needs no replay. Inventory and
 needs are not shown, because the log doesn't carry them; that would need a same-engine replay.
 """
 import argparse
@@ -57,7 +57,8 @@ def moves(events: list[dict]) -> dict[int, list[list]]:
     """Each villager's [tick, place, activity] changes. At tick t a villager is at the last entry with
     tick <= t, which is their state after tick t ran. tests/test_viewer.py checks this against the sim.
     On a map log a walker's place is None and its entry carries [from, to, depart]: it left `from` at
-    tick `depart` for place `to`, at the map's walking speed."""
+    tick `depart` for place `to`, at the map's walking speed. A player's walked body (walk-1) standing in
+    the open has place None and [tile, None, tick]: it stands on `tile`, bound for nowhere."""
     pop = events[0]["data"]["population"]
     home = {a["id"]: pop["families"][a["family"]]["home"] for a in pop["agents"]}
     out = {aid: [[0, h, "sleep"]] for aid, h in home.items()}  # genesis: everyone asleep at home
@@ -81,6 +82,8 @@ def moves(events: list[dict]) -> dict[int, list[list]]:
             put(aid, e["tick"], d["place"], d["activity"])
         elif kind == "arrive":
             put(aid, e["tick"], d["place"], out[aid][-1][2])
+        elif kind == "moved":  # walk-1: a player's step; in the open the body stands on its tile
+            put(aid, e["tick"], d["place"], "visit", [] if d["place"] is not None else [d["pos"], None, e["tick"]])
         elif kind == "sleep":
             put(aid, e["tick"], home[aid], "sleep")
     return out

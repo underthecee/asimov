@@ -67,6 +67,8 @@ It gets:
   text), `offer` and `cooldown_until`. `offer` maps each action a deliberation would be offered from
   here to the people it may name (empty for non-person actions). The engine checks again when the act
   applies, so an act can still get `"not offered"`. A field added later needs a spec line.
+  With walk-1, `pos` is the tile the engine holds for a walked body, and `place` and `route` are both null
+  while it stands in the open (`present` is then empty and `offer` holds only what needs nobody).
 
 "Both" (an inhabitant and a god connection held by one person, gated on run.json `"divine": true`) is
 not enforced yet. God scope is the dev and review tool until a game design says what divine power
@@ -99,6 +101,16 @@ sent twice and none skipped.
     phase, and the outcome is a `receipt` event citing the `act` event (plan/player-body-spec.md). The
     ack names the `act` event, not the receipt. An act followed in the same tick by `release`, or by a
     `possess` of another body, gets a `"released"` receipt and never resolves.
+  - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
+    x first, at most `map.walk` tiles a tick over all its walks that tick. `to` goes with `walk` alone, takes no
+    target or place, and must be a tile inside `verbs.act.to` (`[x0, y0, x1, y1]`, inclusive: the places' bounding
+    box plus a margin); anything else is refused before it is logged. A walk is not the tick's one act: a walk
+    and an act may share a tick, and the act is judged where the body then stands. The engine answers with a
+    `moved` event citing the act, `{from, pos, place}`: `place` is the place whose rectangle holds the tile
+    (the nearest anchor, then the lowest name, where two overlap), or null out in the open, where the body is
+    with nobody. A sleeper's walk, or one at bedtime, gets a failed `receipt` instead ("asleep", "bedtime").
+    The body stands where it stopped for a step's time (`DEFAULT_STEP_TICKS`), then its day takes over, as after
+    any act. Walking out of a place answers an ask held there as declined.
 
 `control` (god scope only): `{"type": "control", "op": "pause" | "run" | "step" | "speed", "tps": 2.0}`.
 `step` runs one tick while paused; `speed` takes `tps` between 0.01 (100 s a tick, for a person playing) and 1000.

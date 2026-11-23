@@ -91,6 +91,11 @@ def rows(run_dir: str) -> dict:
     for e in evs:
         if e["kind"] == "receipt" and e["actor"] == body and e["parents"]:
             receipt.setdefault(e["parents"][0], e)
+    # walk-1: a step is not the tick's act and is sent as often as once a second, so steps are counted apart
+    # and kept out of line 6. The engine answers a step with `moved`, or a failed receipt.
+    moved = {e["parents"][0] for e in evs if e["kind"] == "moved" and e["actor"] == body and e["parents"]}
+    steps = [applied.get(i, {}).get("event") in moved for i, r in got.items() if r["act"]["action"] == "walk"]
+    got = {i: r for i, r in got.items() if r["act"]["action"] != "walk"}
     acts = []
     for i, r in got.items():
         ap = applied.get(i)
@@ -152,7 +157,7 @@ def rows(run_dir: str) -> dict:
     return {"run": os.path.abspath(run_dir), "engine": evs[0]["data"].get("engine"), "body": body, "name": names[body],
             "role": roles[body], "held_min": round((t1 - t0) / 60, 1),
             "ticks": [held_ticks[0], held_ticks[-1]] if held_ticks else None,
-            "acts": acts, "exchanges": exchanges, "heard": heard, "toward": toward}
+            "acts": acts, "walks": {"sent": len(steps), "moved": sum(steps)}, "exchanges": exchanges, "heard": heard, "toward": toward}
 
 
 def metrics(r: dict) -> dict:
@@ -167,6 +172,7 @@ def metrics(r: dict) -> dict:
         "acts": len(acts), "acts_ok": sum(a["ok"] for a in acts),
         "acts_by_kind": dict(Counter(a["action"] for a in acts)),
         "refusals": dict(Counter(a["why"] for a in acts if not a["ok"])),
+        "walks": r.get("walks", {"sent": 0, "moved": 0}),
         "line6": {"n": len(act_lat), "p50": q(act_lat, .5), "p95": q(act_lat, .95), "max": q(act_lat, 1),
                   "pass": bool(act_lat) and q(act_lat, .95) <= LINE6_S},
         "says": len(ex), "says_heard": sum(x["heard"] for x in ex), "says_replied": len(got),
@@ -203,6 +209,7 @@ def report(r: dict, m: dict, form: str | None, grades: dict | None) -> str:
            f"Held {r['held_min']} min" + (f", ticks {r['ticks'][0]}–{r['ticks'][1]}" if r["ticks"] else "") + f". Run: `{r['run']}`.", "",
            "## Measured from the logs", "",
            f"- **Acts:** {m['acts']} sent, {m['acts_ok']} ok. By kind: {m['acts_by_kind']}. Refused or failed: {m['refusals'] or 'none'}.",
+           f"- **Steps walked:** {m['walks']['sent']} sent, {m['walks']['moved']} moved the body.",
            f"- **Line 6, pace:** {'PASS' if l6['pass'] else 'FAIL'}. Received to applied, n {l6['n']}: p50 {l6['p50']} s, p95 {l6['p95']} s, max {l6['max']} s (bar {LINE6_S:g} s at p95).",
            f"- **Line 7, reply time:** {'PASS' if l7['pass'] else 'FAIL'}. Click to reply, n {l7['n']}: p50 {l7['p50']} s, p95 {l7['p95']} s, max {l7['max']} s (bar {LINE7_S:g} s at p95).",
            f"- **Lines said:** {m['says']}; heard by the listener {m['says_heard']}; answered {m['says_replied']}. Lost: {m['says_lost'] or 'none'}.",

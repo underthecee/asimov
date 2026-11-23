@@ -31,7 +31,7 @@ don't depend on how the tester played.
 
 ## The tester's brief
 You are playtesting a village game as a first-time player. You are villager N. Play only through the
-window: `aiplay.py shot | click | scroll | type | key | resize` on DIR; a screenshot's pixels are the click
+window: `aiplay.py shot | click | scroll | type | key | hold | resize` on DIR (`hold DIR w+d 3` holds keys down together for 3 s, to walk); a screenshot's pixels are the click
 coordinates. Don't read the repo, the logs or the run directory: what you can't learn from the screen, a
 player can't either, and that is a finding. The world moves one tick (10 village minutes) about every 20 s
 while you are awake, and you get one action a tick. Keep `DIR/notes.md` as you go: the game clock, what
