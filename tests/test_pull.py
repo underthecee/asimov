@@ -39,7 +39,8 @@ def session(tmp_path, pull_min, acts=4):
         seen = runner.sim.state["tick"]
         for k in range(acts):
             t0 = time.monotonic()
-            c.send(intent(f"a{k}", "act", {"action": "wait"}, seen))
+            # a line said: since time-1b every other act lands the moment it arrives and waits for no tick
+            c.send(intent(f"a{k}", "act", {"action": "say", "target": 0, "text": "Good day."}, seen))
             try:
                 while True:
                     m = await asyncio.wait_for(c.recv(), 3.0)

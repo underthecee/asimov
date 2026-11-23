@@ -75,7 +75,7 @@ def test_possess_act_release_replays_exactly_and_the_mind_deliberates_only_when_
     receipts = {e.parents[0]: e for e in events if e.kind == "receipt" and e.parents and e.parents[0] in
                 {a.id for a in acts}}
     assert len(receipts) == len(acts)  # every act ends its tick with a receipt (S8), or started a step
-    assert any(r.data["why"] == "one act per tick" for r in receipts.values())
+    assert any(r.data["why"] == "busy" for r in receipts.values())  # time-1b: the pair in one tick; was "one act per tick"
     assert not any(e.kind == "mind_deliberate" and e.actor == aid for e in events[rel:rel + 1])
     assert sim.state.get("player") is None and "player" not in sim.state
 
@@ -107,7 +107,7 @@ def test_every_unoffered_act_is_refused_and_rolled_acts_keep_a_minds_cooldown():
     ev = sim.events
     act_ids = {e.id: e for e in ev if e.kind == "act"}
     went, rolled = 0, {}
-    refusals = {"cooldown", "not offered", "unknown target", "one act per tick", "asleep", "bedtime", "falling asleep"}
+    refusals = {"cooldown", "not offered", "unknown target", "one act per tick", "busy", "asleep", "bedtime", "falling asleep"}
     for e in ev:
         if e.kind != "receipt" or not e.parents or e.parents[0] not in act_ids:
             continue
@@ -119,7 +119,7 @@ def test_every_unoffered_act_is_refused_and_rolled_acts_keep_a_minds_cooldown():
         if a.data["action"] in RATED_ACTS and e.data["why"] not in refusals:  # reached the rules
             rolled[e.tick // TICKS_PER_DAY] = rolled.get(e.tick // TICKS_PER_DAY, 0) + 1
     whys = {e.data["why"] for e in ev if e.kind == "receipt" and e.parents and e.parents[0] in act_ids}
-    assert {"not offered", "one act per tick", "asleep", "cooldown"} <= whys, whys
+    assert {"not offered", "busy", "asleep", "cooldown"} <= whys, whys  # time-1b: "busy" is what "one act per tick" was
     assert went > 20 and max(rolled.values()) <= TICKS_PER_DAY // 12
     assert replay([Event(**json.loads(e.to_json())) for e in ev]).state_hash() == sim.state_hash()
 
@@ -138,7 +138,9 @@ class Forced(StubMind):
 
 def test_an_offered_act_gets_the_receipts_a_minds_identical_deliberation_gets():
     """Twin A: the player possesses the body at tick T and acts. Twin B: no player; the body's mind is
-    made to deliberate at T and gives the same answer. Same receipts, rolls and all."""
+    made to deliberate at T and gives the same answer. Same receipts, rolls and all. The act joins the tick
+    at its fixed point (`late`), which is where a mind's answer applies; since time-1b an act that arrives
+    between ticks lands at its own time instead, by the same rules on who is there then (tests/test_time.py)."""
     rng, compared, rolls = random.Random(3), 0, 0
     for trial in range(150):
         seed, aid = rng.randrange(50), rng.randrange(14)
@@ -154,16 +156,18 @@ def test_an_offered_act_gets_the_receipts_a_minds_identical_deliberation_gets():
             target = rng.randrange(14) if action in PERSON_STEPS else None
         out = {"action": action, "target": target} if target is not None else {"action": action}
         twins = []
-        for mind, acts in ((StubMind(), [{"kind": "possess", "agent": aid}, {"kind": "act", **out}]),
-                           (Forced(aid, T, out), [])):
+        joined = []
+        for mind, acts in ((StubMind(), [{"kind": "possess", "agent": aid}]), (Forced(aid, T, out), [])):
             w = Sim(seed, 14, mind)
             w.run_until(T)
             a = w.state["agents"][aid]  # the same occasion and no cooldown in both, so both may act now
             a["cooldown_until"], a["occasion"] = 0, {"why": "hungry", "who": None, "event": None, "tick": T, "salience": 900}
             a["inv"]["food"] = max(1, a["inv"]["food"])  # so the mind's occasion is this one, not its hunger
-            w.step(acts)
+            w.step(acts, during=(lambda s, done: joined.append(s.late_act({"kind": "act", **out}))) if acts else None)
             twins.append(w)
         A, B = twins
+        if joined == [None]:  # its own mind was being asked this tick (a plan on waking): the act waits a tick
+            continue
         if any(e.kind in ("sleep", "wake") and e.actor == aid and e.tick == T for e in A.events) or \
                 A.state["agents"][aid]["asleep"]:
             continue
@@ -271,10 +275,12 @@ def test_scorecard_and_diagnostics_leave_out_a_possessed_villager():
     assert diagnose([Event(**json.loads(l)) for l in log_lines(Sim(5, 12, StubMind()))])["possessed_dropped"] == []
 
 
-def test_an_act_queued_before_a_release_in_its_tick_is_refused_and_never_reaches_the_freed_mind():
+def test_an_act_before_a_release_in_its_tick_lands_first_and_never_reaches_the_freed_mind():
     """Review of #39: [act, release] in one tick resolved the act on a body the player no longer held, and
     its failed receipt filed an occasion the freed mind was then asked about. Possessing another body
-    releases the first the same way."""
+    releases the first the same way. Since time-1b the act lands as it is recorded, while the player still
+    holds the body, so it has its own receipt before the release; the freed mind is still never asked about
+    it. A line said still waits for the tick, so one queued before a release is refused as "released"."""
     cases = 0
     agents = Sim(1, 25, StubMind()).state["agents"]
     # bodies a failed receipt's occasion would reach (salience at least the threshold), plus two it wouldn't
@@ -283,11 +289,12 @@ def test_an_act_queued_before_a_release_in_its_tick_is_refused_and_never_reaches
     bodies = reach[:4] + [a["id"] for a in agents if a["id"] not in reach][:2]
     assert len(bodies) == 6
     for aid in bodies:
-        for action in ("buy_food", "steal", "work"):
+        for action in ("buy_food", "steal", "work", "say"):
+            more = {"text": "Good day."} if action == "say" else {}
             player = {65: [{"kind": "possess", "agent": aid}], 66: [{"kind": "act", "action": "buy_food"}],
-                      70: [{"kind": "act", "action": action, "target": (aid + 1) % 25}, {"kind": "release"}],
+                      70: [{"kind": "act", "action": action, "target": (aid + 1) % 25, **more}, {"kind": "release"}],
                       80: [{"kind": "possess", "agent": aid}],
-                      90: [{"kind": "act", "action": action, "target": (aid + 2) % 25},
+                      90: [{"kind": "act", "action": action, "target": (aid + 2) % 25, **more},
                            {"kind": "possess", "agent": (aid + 1) % 25}],
                       100: [{"kind": "release"}]}
             sim = Sim(1, 25, StubMind())
@@ -299,15 +306,21 @@ def test_an_act_queued_before_a_release_in_its_tick_is_refused_and_never_reaches
             sim.finish()
             acts = [e for e in sim.events if e.kind == "act" and e.tick in (70, 90)]
             gone = {e.id for e in acts}
+            freed = {e.tick: e.id for e in sim.events if e.kind == "release" and e.tick in (70, 90)}
             for e in sim.events:
                 if e.kind == "receipt" and e.parents and e.parents[0] in gone:
-                    assert e.data["why"] == "released" and e.id == e.parents[0] + 1, e
+                    assert e.tick in freed and e.id < freed[e.tick], e  # settled before the body is let go
+                    if action == "say":
+                        assert e.data["why"] == "released" and e.id == e.parents[0] + 1, e
+                    else:
+                        assert e.data["why"] != "released", e
                     gone.add(e.id)
                     cases += 1
-            assert cases and all(not set(e.parents) & gone for e in sim.events
-                                 if e.kind not in ("receipt", "release", "possess") and e.actor == aid), (aid, action)
-            assert replay(sim.events).state_hash() == sim.state_hash()
-    assert cases == 2 * 6 * 3
+            assert cases and (action != "say" or all(
+                not set(e.parents) & gone for e in sim.events
+                if e.kind not in ("receipt", "release", "possess") and e.actor == aid)), (aid, action)
+            assert len(freed) == 2 and replay(sim.events).state_hash() == sim.state_hash()
+    assert cases == 2 * 6 * 4
 
 
 def test_a_possessed_villagers_talks_still_count_for_its_partner():

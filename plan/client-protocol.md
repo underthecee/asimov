@@ -1,8 +1,8 @@
 # Client protocol
 
 2026-11-09. Status: protocol 3 (B10; protocol 1 was PR 1, protocol 2 adds the inhabitant scope of
-plan/player-body-spec.md, protocol 3 is time-1a: a walk is applied and answered the moment it arrives, and its
-`early` message carries the body's new view). Implemented by `asiimov/live.py` and `asiimov/inhabitant.py`.
+plan/player-body-spec.md, protocol 3 is time-1: a walk (time-1a) and every act but `say` (time-1b) is applied and answered the moment
+it arrives, and its `early` message carries the body's new view). Implemented by `asiimov/live.py` and `asiimov/inhabitant.py`.
 Specs: plan/2d-env-eval.md and plan/client-form-factor.md in the shared folder.
 
 The engine is the only source of truth. A client renders what the engine sends and sends intents.
@@ -106,10 +106,17 @@ sent twice and none skipped.
   - `possess` with `{"agent": int}`. Refused with `body_taken` while a body is held (release first).
   - `release` with `{}`. Refused with `no_body` if none is held.
   - `act` with `{"action": one of PLAYER_ACTIONS (DELIBERATE_ACTIONS plus `agree` and `decline`, which answer an ask aimed at the body; target: the asker; and `go_to`), "target": int?, "place": str?}`, on the possessed body. `place` names a place on the map (`verbs.act.place`) and goes with `go_to` alone, which takes no target (go-to-1: the body walks there and stays for an activity's time; its receipt says `heading there` or `already here` with the `arrive` tick, and a second receipt says `arrived`). Refused
-    with `no_body` if none is held. Whether the act works is the engine's call in that tick's commit
-    phase, and the outcome is a `receipt` event citing the `act` event (plan/player-body-spec.md). The
-    ack names the `act` event, not the receipt. An act followed in the same tick by `release`, or by a
-    `possess` of another body, gets a `"released"` receipt and never resolves.
+    with `no_body` if none is held. Whether the act works is the engine's call, and the outcome is a
+    `receipt` event citing the `act` event (plan/player-body-spec.md). The ack names the `act` event, not
+    the receipt. **Every act but `say` lands the moment it arrives (time-1b):** its receipt comes at once in
+    an `early` message, then its `ack`, between ticks too. It holds the body for its cost, one sim-minute
+    (none for `agree`, `decline` and `walk`), and the runner stamps an act that arrives sooner than that at
+    the moment the body is free, so acts sent back to back each land. One the engine still finds the body
+    held for (it arrived in a tick's last sim-minute behind another) gets a failed receipt, `"busy"`.
+    **`say` keeps the tick:** it is recorded as it arrives and resolved at its tick's fixed point, one line
+    a tick (a second gets `"one act per tick"`), and is acked then. A `say` followed in the same tick by
+    `release`, or by a `possess` of another body, gets a `"released"` receipt and never resolves; any other
+    act before the release has already landed.
   - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
     x first, as far as walking speed allows since its last walk: it earns `map.walk` tiles a tick as sim-time
     passes and keeps at most one tick's walking while it stands (time-1a). A walk that asks for more is cut
@@ -176,8 +183,10 @@ when it waits for the next tick and is acked as usual.
 Protocol 3 (time-1a): a `walk` gets its `early` and `ack` the moment it arrives, between ticks too, with
 `"view"`, the inhabitant's whole view from where the body now stands (who is present and in sight there), in
 the shape a `tick` message's view has: `{"type": "early", "tick": 212, "events": [act, moved], "view": {...}}`.
-`tick` is the tick the events belong to, which between ticks is the one that hasn't run yet. Every other act
-arriving between ticks is recorded at once and resolved in its tick, as before.
+`tick` is the tick the events belong to, which between ticks is the one that hasn't run yet.
+From time-1b every act but `say` is answered that way, with its receipt among the events and the view after
+it: `{"type": "early", "tick": 212, "events": [act, receipt], "view": {...}}`. A `say` arriving between ticks
+is recorded at once, resolved in its tick and acked with it, as before.
 
 `heard`, to an inhabitant only, when the runner narrates (readable-world E2; `--narrate`): the spoken words of
 something it just witnessed, sent after the tick, so it can arrive after the next `tick` message:
@@ -224,6 +233,6 @@ player action applies at its tick's fixed point (E4): after the agent loop has b
 before any mind reply applies, those scheduled before the tick first, then late ones in `received` order.
 Nothing it reads is a mind reply of that tick, so its event id and outcome survive the re-run and its
 ack stands, the early one included (tests/test_late_act.py kills a tick after an early ack). A walk taken between
-ticks (time-1a) depends only on the state at the tick's start and the actions before it, which `run.json` holds
-before its ack, so it re-runs to the same event too (tests/test_time.py). With a live LLM mind, the rest of a re-run tick can differ from what was
+ticks (time-1a), and from time-1b any act but `say`, depends only on the state at the tick's start and the actions
+before it, which `run.json` holds before its ack, so it re-runs to the same events too (tests/test_time.py). With a live LLM mind, the rest of a re-run tick can differ from what was
 streamed before the crash.

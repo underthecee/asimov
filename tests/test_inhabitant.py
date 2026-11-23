@@ -32,8 +32,13 @@ def batch_of(out):
     """The same world run in one go with run.json's schedule: what a live world must equal."""
     cfg = persist.config(out)
     sim = Sim(cfg["seed"], cfg["agents"], StubMind())
-    sim.run_until(read_jsonl(os.path.join(out, "events.jsonl"))[-1].tick,
-                  {t: [a for tt, a in cfg["player"] if tt == t] for t, _ in cfg["player"]})
+    log = read_jsonl(os.path.join(out, "events.jsonl"))
+    end = log[-1].tick
+    sim.run_until(end, {t: [a for tt, a in cfg["player"] if tt == t] for t, _ in cfg["player"]})
+    # time-1a: the log may end on actions taken ahead of a tick that never ran; as many as it holds, as replay does
+    taken = sum(e.origin == "player" and e.tick == end for e in log)
+    for a in [a for t, a in cfg["player"] if t == end][:taken]:
+        sim.take(a)
     sim.finish()
     return [e.to_json() for e in sim.events]
 

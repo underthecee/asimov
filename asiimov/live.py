@@ -37,7 +37,7 @@ from . import inhabitant, narrate, persist
 from .llm import SCHEMAS
 from .minds import NoisyMind, ScriptMind, StubMind
 from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
-                  TICKS_PER_DAY)
+                  TICKS_PER_DAY, act_cost)
 from .worldmap import bounds, on_map
 
 PROTOCOL = 3               # 2 adds the inhabitant scope (plan/player-body-spec.md); 3 is time-1a: a walk is applied and
@@ -180,10 +180,11 @@ class LiveRunner:
                         "to": bounds(self.sim.map)}}  # to: walk's tile, within [x0, y0, x1, y1] (walk-1)
 
     def pulls(self, m: dict) -> bool:
-        """Whether an inhabitant's act that waits for the next tick pulls that tick forward. Every act does
-        but a walk (time-1a): a walk is applied the moment it arrives and answered with the body's new view
-        (take_due), so it waits for no tick, wherever it lands. A held key, or a wiggle across a place's edge,
-        doesn't speed the world."""
+        """Whether an inhabitant's act pulls the next tick forward. Every act does but a walk (time-1a): a
+        walk is applied the moment it arrives and answered with the body's new view (take_due), so it waits
+        for no tick, wherever it lands. A held key, or a wiggle across a place's edge, doesn't speed the
+        world. From time-1b the other acts are answered at once too; they still pull, since what they start
+        (a trip, a villager's answer, a line said) shows in the next tick. That is pacing, not a rule."""
         args = m.get("args") if isinstance(m.get("args"), dict) else {}
         return args.get("action") not in WALK_ACTS
 
@@ -310,19 +311,28 @@ class LiveRunner:
             return None, "no_body"
         return act, None
 
-    def _stamped(self, act: dict, tick: int, f: int) -> dict:
+    def _stamped(self, act: dict, tick: int, f: int | None) -> dict:
         """time-1a (B2.1): the act with its time inside `tick`, f in SUBths, which only the runner sets. Acts
         apply in order of t, so it is never earlier than the act scheduled before it (a change of pace
-        between two acts could say otherwise). Left out at 0."""
-        if act["kind"] != "act":
+        between two acts could say otherwise). Left out at 0. `f` None: no clock (a direct caller), no stamp."""
+        if act["kind"] != "act" or f is None:
             return act
-        f = max([min(max(int(f), 0), SUB - 1)] + [a.get("f", 0) for a in self.run.player.get(tick, [])])
+        ahead = [a for a in self.run.player.get(tick, []) if a["kind"] == "act"]
+        f = max([min(max(int(f), 0), SUB - 1)] + [a.get("f", 0) for a in ahead])
+        if act_cost(act["action"]):
+            # time-1b: an act that arrives while the body is still held by the one before it lands the moment
+            # the body is free, if that is inside this tick (the wait is a sim-minute at most); the engine
+            # refuses one stamped earlier as "busy". Acts scheduled and not yet taken hold it too.
+            free = max([self.sim.state.get("player", {}).get("busy", 0) - tick * SUB]
+                       + [a.get("f", 0) + act_cost(a["action"]) for a in ahead if act_cost(a["action"])])
+            f = min(max(f, free), SUB - 1)
         return {**act, "f": f} if f else act
 
-    def submit(self, msg: dict, client: str = "local", scope: str = "god", f: int = 0) -> dict | None:
+    def submit(self, msg: dict, client: str = "local", scope: str = "god", f: int | None = None) -> dict | None:
         """Take an intent. Returns its ack now if it is refused or already decided, or None if it will be
         applied by the next step() (which returns its ack once its event is durable), or sooner by take_due().
-        `f`: how far into the coming tick it arrived, in SUBths (the Hub's clock; 0 for a paused world)."""
+        `f`: how far into the coming tick it arrived, in SUBths (the Hub's clock; 0 for a paused world; None
+        for a caller with no clock, whose act is left unstamped)."""
         iid = msg.get("id")
         if not isinstance(iid, str) or not 1 <= len(iid) <= 64 or iid.startswith("~"):
             return self._ack(iid if isinstance(iid, str) else None, {"status": "rejected", "reason": "bad_id"})
@@ -346,12 +356,13 @@ class LiveRunner:
 
     def take_due(self) -> list:
         """time-1a (B2.2): between ticks, hand the engine every action scheduled for the coming tick that it
-        hasn't had yet (Sim.take), in slot order, so each is recorded as it arrives and a walk moves the body
-        at once. A walk is settled by that: it is acked here, its `received` record durable before, and since
-        its outcome depends only on the actions before it, a resume re-runs it to the same event (step()
-        checks). Returns (intent id, ack, the events the inhabitant sees of it, the inhabitant's new view) for
-        each walk settled; the last two are empty and None for a walk that isn't the inhabitant's. Anything
-        else waits for its tick as before. Without this call the step applies them all, to the same log."""
+        hasn't had yet (Sim.take), in slot order, so each is recorded as it arrives, a walk moves the body at
+        once and (time-1b) every act but a line said lands at once. Those are settled by that: each is acked
+        here, its `received` record durable before, and since its outcome depends only on the actions before
+        it, a resume re-runs it to the same event (step() checks). Returns (intent id, ack, the events the
+        inhabitant sees of it, the inhabitant's new view) for each act settled; the last two are empty and
+        None for one that isn't the inhabitant's. A line said, and anything that isn't an act, waits for its
+        tick as before. Without this call the step applies them all, to the same log."""
         sim, tick = self.sim, self.sim.state["tick"]
         acts = self.run.player.get(tick, [])
         had = len(sim._taken) if sim._window == tick else 0
@@ -368,7 +379,7 @@ class LiveRunner:
             n0 = len(sim.events)
             eid = sim.take(act)
             iid = by_slot.get(slot)
-            if iid is None or not (act["kind"] == "act" and act["action"] in WALK_ACTS):
+            if iid is None or act["kind"] != "act" or act["action"] in SAY_ACTS:
                 continue
             rec = self.intents[iid]
             if rec["status"] == "applied":  # acked before a crash: the re-run must make the same event
@@ -384,7 +395,7 @@ class LiveRunner:
                         inhabitant.view(sim, aid) if mine else None))
         return out
 
-    def queue_late(self, m: dict, client: str, scope: str, send, f: int = 0):
+    def queue_late(self, m: dict, client: str, scope: str, send, f: int | None = None):
         """From the server thread while a tick runs (E4): an inhabitant's act for that tick's fixed point.
         `send(ack, events, view)` is called from the tick's thread with its ack, the events it made and, for a
         walk, the body's new view; or with (None, [], None) if it waits for the next tick, which it joins at
@@ -448,7 +459,7 @@ class LiveRunner:
             mine = [e for e in evs if e.id == player[slot].id or (e.parents and e.parents[0] == player[slot].id)]
             self.early(iid, self._ack(iid, rec), self._seen(mine, aid))
 
-    def _take_late(self, m: dict, client: str, scope: str, f: int = 0) -> tuple[dict | None, list, dict | None]:
+    def _take_late(self, m: dict, client: str, scope: str, f: int | None = None) -> tuple[dict | None, list, dict | None]:
         """submit(), at the fixed point: the act applies now if it can (Sim.takes_late), its `received`
         record durable first. Its outcome depends only on what came before the fixed point, so a resume
         re-runs it to the same event (Steering, 10:09Z). One that can't join waits for the next tick, at `f`.
@@ -466,7 +477,7 @@ class LiveRunner:
             rec = self.intents[iid] = {"status": "rejected", "reason": reason}
             self._side("rejected", id=iid, client=client, reason=reason, msg=_clip(m))
             return self._ack(iid, rec), [], None
-        late = act["kind"] == "act" and sim.takes_late()
+        late = act["kind"] == "act" and sim.takes_late({**act, "f": SUB - 1})
         at = tick if late else tick + 1
         act = self._stamped(act, at, SUB - 1 if late else f)
         if late:
@@ -483,7 +494,7 @@ class LiveRunner:
         rec.update(status="applied", event=eid)
         self._side("applied", id=iid, tick=tick, event=eid, early=True)
         aid = self.inhabitant["agent"] if self.inhabitant else None
-        view = inhabitant.view(sim, aid) if aid is not None and act["action"] in WALK_ACTS else None
+        view = inhabitant.view(sim, aid) if aid is not None else None
         return self._ack(iid, rec), self._seen(sim.events[n0:], aid), view
 
     @staticmethod
