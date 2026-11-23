@@ -14,7 +14,7 @@ import random
 
 import pytest
 
-from asiimov import llm, memory, narrate, verbs
+from asiimov import llm, memory, narrate, things, verbs
 from asiimov import sim as S
 from asiimov.minds import StubMind
 from asiimov.params import generate_population
@@ -74,6 +74,9 @@ NARRATOR_DOING = {"work": "at work", "socialize": "passing the time", "home": "a
 # ------------------------------------------------------------------ a pure move: the lists
 def test_every_list_read_from_the_table_is_the_literal_it_replaced():
     for name, was in BEFORE.items():
+        if name == "PLAYER_ACTIONS":  # things-1 added its four rows after them, and nothing else has changed
+            assert S.PLAYER_ACTIONS == verbs.PLAYER_ACTIONS == was + verbs.THING_ACTS
+            continue
         assert getattr(S, name) == was == getattr(verbs, name), name
     for name, was in UNORDERED.items():
         assert set(getattr(S, name)) == set(was) and len(getattr(S, name)) == len(was), name
@@ -109,7 +112,7 @@ def test_every_row_is_whole():
     assert sorted(ranks) == list(range(1, len(ranks) + 1))  # a step's rank is its place in STEP_DOS
     for name, row in VERBS.items():
         assert row["who"] and set(row["who"]) <= {"mind", "player", "rule"}, name
-        assert row["takes"] in (None, "person", "place", "tile", "line"), name
+        assert row["takes"] in (None, "person", "place", "tile", "line", "thing", "gift"), name
         assert row["kind"] in ("now", "ask", "reach", "hold", "activity", "go"), name
         assert callable(getattr(Sim, row["handler"])), name  # the engine method that carries it out
         assert (row["among"] is not None) == (name in S.DELIBERATE_ACTIONS and row["takes"] == "person"), name
@@ -130,7 +133,10 @@ def test_every_verb_a_mind_may_choose_has_its_words_and_every_player_verb_its_la
     for name in S.STEP_DOS:  # what a plan or a step may name reads as words in the plan panel, or names a person
         assert "plan" in VERBS[name]["words"] or VERBS[name]["takes"] == "person", name
     unlabelled = {name for name in S.PLAYER_ACTIONS if "label" not in VERBS[name]["words"]}
-    assert unlabelled == {"go_to", "say", "walk"}  # a click on the map, the Talk box and the walking keys
+    # a click on the map, the Talk box and the walking keys; a thing's kind words its own labels (things-1)
+    assert unlabelled == {"go_to", "say", "walk"} | set(verbs.THING_ACTS)
+    for name in verbs.THING_ACTS:
+        assert VERBS[name]["words"]["doing"] and name in things.client_words(), name
 
 
 def test_every_reason_a_receipt_can_carry_has_its_words():
@@ -165,6 +171,8 @@ def _player_days(seed: int) -> Sim:
                 act["to"] = [rng.randint(-8, 8), rng.randint(-8, 8)]
             elif takes == "person" and (act["action"] in S.HAIL_ACTS or rng.random() < 0.8):
                 act["target"] = rng.randrange(24)
+            elif takes in ("thing", "gift"):  # things-1: this world has none, and says so
+                act.update(thing=rng.randrange(40), **({"target": rng.randrange(24)} if takes == "gift" else {}))
             acts = [act] * (2 if rng.random() < 0.05 else 1)
         sim.step(acts)
     return sim
@@ -209,6 +217,8 @@ def _act(sim, name, b, f=0):
         act["to"] = sim.tile(sim.state["agents"][b])
     elif takes == "person":
         act["target"] = other
+    elif takes in ("thing", "gift"):
+        act.update(thing=0, **({"target": other} if takes == "gift" else {}))
     return act
 
 

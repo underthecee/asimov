@@ -784,15 +784,15 @@ func _lost_lines(evs: Array) -> void:
 			_return_line(int(d["to"]))
 
 
-func _choose(action: String, target: int, place: String, label: String) -> void:
+func _choose(action: String, target: int, place: String, label: String, thing: int = -1) -> void:
 	## A button or a map place: into the plan with "Plan ahead" on, else done now. A yes or no to an ask always
 	## goes now: it has a few ticks before your habits answer (aipt1 fix 3).
-	if ui["ahead"].button_pressed and not action in ["agree", "decline"]:
+	if ui["ahead"].button_pressed and not action in ["agree", "decline"] and thing < 0:  # a thing is acted on now
 		if plan_q.size() < Plan.MAX_STEPS:
 			plan_q.append(Plan.step(action, target, place, label))
 		_plan_run()
 	elif pending.is_empty():
-		pending = {"id": client.act(action, target, place), "label": label, "tick": int(client.view["tick"])}
+		pending = {"id": client.act(action, target, place, "", "", -1, thing), "label": label, "tick": int(client.view["tick"])}
 	_refresh_inhabit()
 
 
@@ -889,7 +889,7 @@ func _e_pick(i: int) -> void:
 	if it["action"] == "talk":
 		_talk_with(int(it["target"]))
 	else:
-		_choose(it["action"], int(it["target"]), "", it["label"])
+		_choose(it["action"], int(it["target"]), "", it["label"], int(it.get("thing", -1)))
 
 
 func _talk_with(t: int) -> void:
@@ -985,7 +985,8 @@ func _rebuild_menu() -> void:
 	var items := LiveClient.menu(v)
 	var cooling := int(v["tick"]) < int(v["cooldown_until"])
 	var ahead: bool = ui["ahead"].button_pressed
-	var key := JSON.stringify([items, pending.get("id"), cooling, v.get("asks", []), ahead])
+	var things := Words.thing_items(v, names)  # things-1: what the offer lets you do with a thing
+	var key := JSON.stringify([items, pending.get("id"), cooling, v.get("asks", []), ahead, things])
 	if key == _menu_key:
 		return
 	_menu_key = key
@@ -1008,7 +1009,19 @@ func _rebuild_menu() -> void:
 		var hint := Label.new()
 		hint.text = "Click a place on the map to walk there."
 		box.add_child(hint)
-	if items.is_empty():
+	if not things.is_empty():  # things-1: a row for what lies in reach or is in your hands
+		var trow := HFlowContainer.new()
+		var tlab := Label.new()
+		tlab.text = "Things:"
+		trow.add_child(tlab)
+		for it in things:
+			var tb := Button.new()
+			tb.text = it["label"]
+			tb.disabled = not pending.is_empty()
+			tb.pressed.connect(_choose.bind(it["action"], int(it["target"]), "", it["label"], int(it["thing"])))
+			trow.add_child(tb)
+		box.add_child(trow)
+	if items.is_empty() and things.is_empty():
 		var l := Label.new()
 		l.text = "Nothing to do while asleep." if v["asleep"] else "Nothing to choose right now."
 		box.add_child(l)
@@ -1234,6 +1247,9 @@ func _draw_inhabitant() -> void:
 	var v: Dictionary = client.view
 	var at := (_me_tiles() + Vector2(0.5, 0.5) - lo) * k + origin  # a whole coordinate is a tile's centre
 	var px := maxf(k * 2.2, 12.0)
+	for t in v.get("things", []):  # things-1: each thing on its tile, under the people; a ring on one in reach
+		var tat: Vector2 = (Vector2(t["pos"][0], t["pos"][1]) + Vector2(0.5, 0.5) - lo) * k + origin
+		Art.thing(self, tat, str(t["kind"]), px, bool(t.get("reach", false)), bool(t.get("yours", false)))
 	var here: Rect2 = map_rects.get(str(v.get("place")), Rect2(at - Vector2(px, px), Vector2(px, px) * 2)).grow(-2)
 	var seen := _map_view().grow(-px)
 	# Zoomed in, a big place runs off the column: spread the people over what shows. Not where the keys walk

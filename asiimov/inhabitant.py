@@ -7,12 +7,13 @@ the live runner calls it between ticks, and test_inhabitant checks the log still
 import json
 
 from .sim import ANSWER_ACTS, OCCASION_TICKS, PERSON_STEPS, SUB, TALK_WHY, TICKS_PER_DAY
+from .things import THINGS
 from .worldmap import SEE, near
 
 # The per-tick view's keys, as the spec lists them. A new field needs a spec line, and bar 5 checks this.
 VIEW_KEYS = ("tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan", "recent",
              "present", "kin", "market_food", "occasion", "offer", "cooldown_until", "food_price", "intent", "asks",
-             "seen")
+             "seen", "things", "carried")
 PUBLIC = frozenset({"fire"})            # events the whole village sees
 NAMES = ("with", "to", "target", "household")  # data fields that name the villager an event is about
 # Another villager's events it can see, and the fields of each: what it does in plain sight. Nothing that
@@ -164,6 +165,26 @@ def view(sim, aid: int) -> dict:
                 and any(sim.can_hail(a, agents[o], tick * SUB + k[0]) is None for k in g["track"])]
         if hail:
             out["offer"]["hail"] = hail
+    if "things" in st:  # things-1 (B3.5): the things in sight, what the body carries, and what it can do with them
+        mine = sim.carried(aid)
+        lying = [r for r in st["things"]["list"]  # a fixture is a map feature, always drawn (Steering 22:03Z)
+                 if r["at"] is not None and (THINGS[r["kind"]]["stands"] or sim.sees_thing(a, r))]
+        out["things"] = [{"id": r["id"], "kind": r["kind"], "pos": list(r["at"]),
+                          **({"reach": True} if sim.beside(a, r, tick * SUB) else {}),
+                          **({"yours": True} if THINGS[r["kind"]]["own"] and sim.thing_owner(a, r) else {})}
+                         for r in lying]
+        out["carried"] = [{"id": r["id"], "kind": r["kind"]} for r in mine]
+        if not a["asleep"]:
+            beside = [r for r in lying if sim.beside(a, r, tick * SUB)]
+            use = [r["id"] for r in beside + mine
+                   if THINGS[r["kind"]]["use"] and (r["holder"] == aid or sim.thing_owner(a, r))
+                   and THINGS[r["kind"]]["use"].get("verb", "") in ("", *out["offer"])]
+            take = [r["id"] for r in beside if THINGS[r["kind"]]["carry"]] \
+                if len(mine) < st["stakes"]["things"]["carry"] else []
+            hand = [o for o in near_ids(sim, aid) if not agents[o]["asleep"]] if mine else []
+            for verb, ids in (("take", take), ("use", use), ("drop", [r["id"] for r in mine]), ("hand", hand)):
+                if ids:
+                    out["offer"][verb] = ids
     assert set(out) <= set(VIEW_KEYS), "a view field outside the spec's list"
     return out
 

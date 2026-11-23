@@ -121,6 +121,36 @@ static func villager(ci: CanvasItem, at: Vector2, role: String, px: float, mine 
 		label(ci, c + Vector2(px * 0.3, -px * 0.45), "z", 10)
 
 
+static func thing(ci: CanvasItem, at: Vector2, kind: String, px: float, reach := false, yours := false) -> void:
+	## things-1: one thing on its tile, drawn from shapes (no sprite yet): what grows is small and round, a
+	## fixture is a block. One in reach gets the ring E and T give a villager; a fixture that is yours, a gold edge.
+	var r := px * 0.28
+	match kind:
+		"berries":
+			ci.draw_circle(at, r, Color(0.2, 0.45, 0.22))
+			for d in [Vector2(-0.4, -0.2), Vector2(0.35, -0.3), Vector2(0.0, 0.35)]:
+				ci.draw_circle(at + d * r, r * 0.28, Color(0.85, 0.2, 0.3))
+		"flower":
+			ci.draw_line(at + Vector2(0, r), at, Color(0.3, 0.6, 0.3), maxf(1.0, r * 0.2))
+			for i in 5:
+				ci.draw_circle(at + Vector2(cos(i * TAU / 5.0), sin(i * TAU / 5.0)) * r * 0.45, r * 0.3, Color(0.95, 0.6, 0.8))
+			ci.draw_circle(at, r * 0.25, Color(0.98, 0.85, 0.3))
+		"stall":
+			ci.draw_rect(Rect2(at - Vector2(r * 1.3, r * 0.6), Vector2(r * 2.6, r * 1.3)), Color(0.55, 0.38, 0.22))
+			ci.draw_rect(Rect2(at - Vector2(r * 1.5, r * 1.1), Vector2(r * 3.0, r * 0.55)), Color(0.85, 0.3, 0.25))
+		"bench":
+			ci.draw_rect(Rect2(at - Vector2(r * 1.1, r * 0.35), Vector2(r * 2.2, r * 0.7)), Color(0.6, 0.45, 0.28))
+		"bed":
+			ci.draw_rect(Rect2(at - Vector2(r * 1.1, r * 0.6), Vector2(r * 2.2, r * 1.2)), Color(0.75, 0.78, 0.9))
+			ci.draw_rect(Rect2(at - Vector2(r * 1.1, r * 0.6), Vector2(r * 0.6, r * 1.2)), Color(0.95, 0.95, 1.0))
+		_:
+			ci.draw_circle(at, r * 0.6, Color(0.8, 0.8, 0.8))
+	if yours:
+		ci.draw_rect(Rect2(at - Vector2(r * 1.4, r * 0.9), Vector2(r * 2.8, r * 1.8)), Color(0.95, 0.85, 0.4), false, 1.5)
+	if reach:
+		ci.draw_arc(at, r * 1.7, 0.0, TAU, 24, Color(0.55, 0.9, 1.0, 0.95), 1.5)
+
+
 static func label(ci: CanvasItem, at: Vector2, text: String, size := 11, col := LABEL, width := -1.0) -> void:
 	## Text with a dark edge, readable on any ground and under the night tint.
 	var font := ThemeDB.fallback_font

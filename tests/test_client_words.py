@@ -52,6 +52,8 @@ def source_whys() -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "_receipt" and len(node.args) >= 5:
             out |= _strings(node.args[4])
+        if isinstance(node, ast.Assign) and [getattr(t, "id", None) for t in node.targets] == ["why"]:
+            out |= _strings(node.value)  # things-1: `why = "..." if ... else ...`, then handed to _receipt by name
         if isinstance(node, ast.Tuple) and len(node.elts) == 2 and isinstance(node.elts[0], ast.Constant) \
                 and isinstance(node.elts[0].value, bool) and isinstance(node.elts[1], ast.Constant) \
                 and isinstance(node.elts[1].value, str):
@@ -76,6 +78,10 @@ def session_whys() -> set[str]:
                     act["to"] = [rng.randint(-8, 8), rng.randint(-8, 8)]
                 elif act["action"] in getattr(S, "HAIL_ACTS", ()):  # reach-1: a call to someone walking by
                     act["target"] = rng.randrange(24)
+                elif act["action"] in getattr(S, "THING_ACTS", ()):  # things-1: an act on a thing, by its id
+                    act["thing"] = rng.randrange(40)
+                    if act["action"] in S.HAND_ACTS:
+                        act["target"] = rng.randrange(24)
                 elif rng.random() < 0.8:
                     act["target"] = rng.randrange(24)
                 acts = [act] * (2 if rng.random() < 0.05 else 1)
@@ -87,7 +93,7 @@ def session_whys() -> set[str]:
 def test_the_scan_finds_the_engines_whys():
     found = source_whys()
     assert {"refused", "kin refused", "nothing to spare", "target asleep", "not offered", "caught",
-            "no food to give", "no coin to give"} <= found
+            "no food to give", "no coin to give", "hands full", "not yours", "target hands full", "picked"} <= found
 
 
 def test_every_why_a_receipt_can_carry_is_worded_in_the_client():

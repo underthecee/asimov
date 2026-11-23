@@ -101,21 +101,24 @@ def config(out: str) -> dict:
 
 def start(out: str, seed: int, agents: int, mind, order: str = "id", player: dict | None = None,
           workers: int = 1, snapshot_every: int = TICKS_PER_DAY, days: int | None = None,
-          mind_kind: str | None = None, talk: dict | None = None) -> Run:
+          mind_kind: str | None = None, talk: dict | None = None, things: dict | None = None) -> Run:
     """Start a new world in `out`. Refuses a directory that already holds a log. `talk`: talk-1's parameters
-    (sim.TALK_DEFAULTS) where they differ, recorded in genesis; a world without them is a default world."""
+    (sim.TALK_DEFAULTS) where they differ, recorded in genesis; a world without them is a default world.
+    `things`: things-1's parameters (things.DEFAULTS), recorded in genesis; a world without them has no things."""
     player = player or {}
     if os.path.exists(os.path.join(out, "events.jsonl")):
         raise FileExistsError(f"{out} already holds a run; resume it or pick another directory")
     os.makedirs(out, exist_ok=True)
     cfg = {"seed": seed, "agents": agents, "order": order,
            "player": [[t, act] for t in sorted(player) for act in player[t]],
-           "days": days, "mind": mind_kind, "model": getattr(mind, "model", None), **({"talk": talk} if talk else {})}
+           "days": days, "mind": mind_kind, "model": getattr(mind, "model", None), **({"talk": talk} if talk else {}),
+           **({"things": things} if things else {})}
     _atomic_write(os.path.join(out, "run.json"), json.dumps(cfg, indent=1))
     pop = None
-    if talk:
+    if talk or things:
         pop = generate_population(seed, agents)
-        pop["stakes"] = {**json.loads(json.dumps(DEFAULT_STAKES)), "talk": dict(talk)}
+        pop["stakes"] = {**json.loads(json.dumps(DEFAULT_STAKES)), **({"talk": dict(talk)} if talk else {}),
+                         **({"things": json.loads(json.dumps(things))} if things else {})}
     run = Run(out, Sim(seed, agents, mind, genesis=pop, order=order, workers=workers), player, 0, 0, snapshot_every,
               days)
     run._append()

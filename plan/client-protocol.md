@@ -68,6 +68,12 @@ It gets:
   text), `offer` and `cooldown_until`. `offer` maps each action a deliberation would be offered from
   here to the people it may name (empty for non-person actions). The engine checks again when the act
   applies, so an act can still get `"not offered"`. A field added later needs a spec line.
+  With things-1, in a world that has things: `things` lists every fixture (a map feature, always drawn) and
+  what else lies in sight, each `{id, kind, pos}` with `reach: true` when it is on the body's tile or the
+  next one and `yours: true` for a fixture that is the body's to use. A thing inside a place shows only to a
+  body in that place or beside it; one in the open, within 6 tiles. `carried` lists what is in the body's
+  hands, `{id, kind}`. `offer` gains `take`, `use` and `drop` (the ids of the things each may name) and
+  `hand` (who is in reach and awake, while something is carried). A world without things has none of these.
   With walk-1, `pos` is the tile the engine holds for a walked body, and `place` and `route` are both null
   while it stands in the open (`present` is then empty and `offer` holds only what needs nobody).
   With space-1 (plan/v0-contracts-spec.md, B1) every `pos` is the tile the body stands on: for someone at a
@@ -133,6 +139,16 @@ sent twice and none skipped.
     and the receipt says `hailed`; `already stopped` (ok) for one that already waits, which gains no time;
     refused `target not in sight`, or `not walking` for one at a place. A line said to it, or an act on it
     from within reach, starts its wait again. `target` is required.
+  - `act` with `{"action": "take" | "drop" | "use", "thing": id}` or `{"action": "hand", "thing": id, "target":
+    id}` (things-1, the player's alone, in a world started with `--things`): the body picks a thing up from
+    its tile or the next one, puts down one it carries on the tile it stands on, uses one beside it, or
+    hands one it carries to someone in reach and awake. Each lands at once and costs a sim-minute. A success
+    is a rule event by the body (`took {thing, kind, from}`, `dropped {thing, kind, at}`, `used {thing, kind,
+    food}`, `handed {thing, kind, to}`) and a receipt citing it (`took`, `dropped`, `picked`, `handed`). Using
+    a fixture (the stall, your bench, your bed) is the verb done there, so its receipt is that verb's
+    (`buy_food`, `work`, `rest`). Refusals: `nothing there`, `not in reach`, `can't be carried`, `hands full`,
+    `already carried`, `not carried`, `no use`, `not yours`, `target not here`, `target asleep`, `target hands
+    full`. `thing` goes only on these four, and `target` only on `hand`; anything else is `bad_args`.
   - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
     x first, as far as walking speed allows since its last walk: it earns `map.walk` tiles a tick as sim-time
     passes and keeps at most one tick's walking while it stands (time-1a). A walk that asks for more is cut

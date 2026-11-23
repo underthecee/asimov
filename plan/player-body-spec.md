@@ -344,6 +344,44 @@ byte-identical to reach-1's (only the engine field differs).
 - **A new verb is a row**, its handler, and `python -m asiimov.verbs`; one a mind can choose also needs
   its bank and bars (B7.2).
 
+## Things in the world (things-1, plan/v0-contracts-spec.md B3; Steering 2026-11-23 22:03Z)
+- **One ledger.** Food and coin stay counts. A unique thing is a record in `state["things"]["list"]`, `{id,
+  kind, at: [x, y] or null, holder: villager id or null}`, with exactly one of `at` and `holder` set; ids
+  count up and are never reused.
+- **One kinds table**, `asiimov/things.py` `THINGS`, five of the six kinds Build 1 allows: whether it can be
+  carried, what using it does, whose it is to use, what that costs, where it stands or grows, its words.
+  - `berries`: grow in the woods, 6 lying there after each dawn. Using one gives 1 food and the thing goes.
+  - `flower`: grows in the woods, 4 after each dawn. Carried, put down, handed over. No use.
+  - `stall` (the market), `bench` (one at each workplace), `bed` (one in each home): fixtures. Using one is
+    the verb done there (`buy_food`, `work`, `rest`), by that verb's own rule, offer and receipt. A bench
+    and a bed are for the body whose workplace or home it is.
+- **A stake, `things`** (`{carry: 4, grows: {berries: 6, flower: 4}}`, recorded in genesis), set by `--things`
+  on a new live world. A world without it has no things, and neither has a world with no player: things
+  are made at the first `possess` (B3.4). So every earlier log stands, the no-player bar included. Every
+  Build 1 launcher passes `--things`.
+- **Every change is an event** (B3.3). `things` (at the first possess, citing it): every fixture and the
+  first growth. `grew` (at 06:00, when the ground made anything): each growing kind brought back to its
+  count on free tiles of its place, picked by the lowest keyed score (stream `things:<kind>:<day>`, index:
+  the tile's number among the place's tiles; T22). `took`, `dropped`, `handed`: a thing changes hands or
+  tiles. `used`: it goes, and its food is counted in the food ledger. Nothing else makes, moves or ends one.
+- **Four verbs, rows of the verb table, the player's alone:** `take`, `drop`, `use`, `hand`, each naming a
+  thing by id (`hand` also a person), each a sim-minute. Reach to a thing is by tile, inside a place too: on
+  the body's tile or the next one at the act's own time. `hand` needs the receiver in reach (`_near`),
+  awake, and with a hand free; a villager holds what it is handed (the record's `holder`; no villager field)
+  and does nothing with it in Build 1.
+- **A gift of a thing follows give_food's rule:** the receiver warms to the giver by 100, both remember it
+  ("gave a flower to X", "Y gave me a flower"), and the receiver may stop to think ("Y gave you a flower").
+  That is the only text a thing puts in a prompt. `tests/test_things.py` holds the row check Steering asked
+  for: per kind, the receiver's prompt differs from its prompt after a gift of food only in that sentence
+  and that note, which name exactly the giver and the thing.
+- **The view** (B3.5): `things`, `carried`, and `offer.take`, `use`, `drop`, `hand` (plan/client-protocol.md).
+  A thing inside a place shows only to a body in that place or beside it; one in the open, within 6 tiles;
+  a fixture always. A fixture's use is offered only beside it, to its owner, when its verb is offered.
+- **Invariants** (`invariants.Things`, `thing_violations`): the ledger is rebuilt from the log alone and must
+  equal the state's; a take, a put-down and a use happen within a tile of the thing; each record has one of
+  a tile and a holder, a tile on the map, a known kind; no fixture is held; nobody carries more than the cap.
+- **Tests:** `tests/test_things.py` (21) and `client/godot/tests/test_things.gd`.
+
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical
    to the previous engine's apart from the genesis `engine` field, and the state hash at every

@@ -20,6 +20,59 @@ const ASKING := VerbWords.ASKING
 const ASKED := VerbWords.ASKED
 const HERE_ONLY := VerbWords.HERE_ONLY  # sim.INSTANT_STEPS: refused with the target elsewhere
 const RATED := VerbWords.RATED  # held to the cooldown (sim.RATED_ACTS)
+# things-1: the verbs that name a thing, and by kind a thing's name and the label of each verb it allows
+# (asiimov/things.py). A kind with no label for a verb doesn't take it.
+const THING_ACTS := VerbWords.THING_ACTS
+const THING_NAME := VerbWords.THING_NAME
+const THING_USE := VerbWords.THING_USE
+const THING_TAKE := VerbWords.THING_TAKE
+const THING_DROP := VerbWords.THING_DROP
+const THING_HAND := VerbWords.THING_HAND
+const THING_GIFT := VerbWords.THING_GIFT
+
+
+static func thing_items(v: Dictionary, names: Dictionary) -> Array:
+	## things-1: what the server offers to do with a thing, each {label, action, target, thing}: use, take and
+	## put down name the things; hand names who is in reach, once for each kind of thing carried. Straight
+	## from the offer: nothing is added, and two of a kind show once.
+	var kinds := {}
+	for t in v.get("things", []) + v.get("carried", []):
+		kinds[int(t["id"])] = str(t["kind"])
+	var out := []
+	var had := {}
+	var offer: Dictionary = v.get("offer", {})
+	for pair in [["use", THING_USE], ["take", THING_TAKE], ["drop", THING_DROP]]:
+		for id in offer.get(pair[0], []):
+			var kind: String = kinds.get(int(id), "")
+			if pair[1].has(kind) and not had.has([pair[0], kind]):
+				had[[pair[0], kind]] = true
+				out.append({"label": pair[1][kind], "action": pair[0], "target": -1, "thing": int(id)})
+	for c in v.get("carried", []):
+		var kind := str(c["kind"])
+		for t in offer.get("hand", []):
+			if THING_HAND.has(kind) and not had.has(["hand", kind, int(t)]):
+				had[["hand", kind, int(t)]] = true
+				out.append({"label": THING_HAND[kind] % str(names.get(int(t), "them")), "action": "hand",
+						"target": int(t), "thing": int(c["id"])})
+	return out
+
+
+static func _thing_receipt(d: Dictionary, me_id: int, names: Dictionary) -> String:
+	## things-1: your own act on a thing, in words: what you did, or why it didn't work.
+	var thing: String = THING_NAME.get(str(d.get("kind", "")), "it")
+	var why := str(d.get("why", ""))
+	if d.get("ok", false):
+		match why:
+			"took":
+				return "You pick up %s." % thing
+			"dropped":
+				return "You put down %s." % thing
+			"handed":
+				return "[color=#80d080]You give %s to %s.[/color]" % [thing, _who(d.get("to"), me_id, names)]
+			"picked":
+				return "[color=#80d080]You pick from %s: %d more food.[/color]" % [thing, int(d.get("food", 0))]
+	var said: String = WHY.get(why, why)
+	return "Didn't work with %s: %s." % [thing, said]
 
 
 static func shown(item: Dictionary, present: Dictionary) -> bool:
@@ -193,6 +246,8 @@ static func _receipt(e: Dictionary, d: Dictionary, mine: bool, a: String, me: Di
 		if why in ANSWERS and not d.has("answered"):  # nobody pressed yes or no: the villager's habits answered
 			answer = "you didn't answer, so your habits did: " + answer
 		return line + (": " + answer + "." if answer != "" else ".")
+	if str(d.get("action", "")) in THING_ACTS:
+		return _thing_receipt(d, me_id, names)
 	if e.get("origin") == "rule" and why in ["heading to market", "started", "waited"] and d.get("ok", false):
 		return ""  # the activity line that follows says it
 	if str(d.get("action", "")) == "say" and not d.get("ok", false):  # aipt1: a lost line is said in the log
@@ -313,6 +368,11 @@ static func status(v: Dictionary, me: Dictionary, per_day: int) -> String:
 		lines.append("%s at %s." % [NOW.get(str(v["activity"]), str(v["activity"])), place(v["place"], me)])
 	lines.append("Hunger %d/1000, %s." % [int(v["hunger"]), hunger_word(int(v["hunger"]))])
 	lines.append("You carry %d food and %d coin." % [int(v["food"]), int(v["coin"])])
+	if not v.get("carried", []).is_empty():  # things-1: what is in your hands
+		var held := []
+		for c in v["carried"]:
+			held.append(str(THING_GIFT.get(str(c["kind"]), c["kind"])))
+		lines.append("In your hands: %s." % ", ".join(held))
 	var price := int(v.get("food_price", 0))
 	if price > 0:
 		lines.append("Food costs %d coin at the market; your coin buys %d." % [price, int(v["coin"]) / price])

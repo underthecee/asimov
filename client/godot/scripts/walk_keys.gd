@@ -63,6 +63,7 @@ static func track_tile(p: Dictionary, f: float):
 
 
 static func items(v: Dictionary, target: int, names: Dictionary, can_hear: bool) -> Array:
+	## things-1: then what can be done with a thing in reach or in your hands (each also carries `thing`).
 	## The E list: what can be done with the villager in reach (talk, then whatever the server offers that names
 	## them: for someone walking by in sight, calling out to them), then what the server offers that names nobody. Each {label, action, target}; "talk" is the client's
 	## own (it puts the Talk box on them). The offer is the server's: nothing is added to it here.
@@ -76,6 +77,9 @@ static func items(v: Dictionary, target: int, names: Dictionary, can_hear: bool)
 		for it in menu:
 			if int(it["target"]) == target and Words.shown(it, present) and not it["action"] in AFAR:
 				out.append({"label": Words.action_label(it["action"], who), "action": it["action"], "target": target})
+	for it in Words.thing_items(v, names):  # things-1: what lies in reach or is in your hands
+		if int(it["target"]) < 0 or int(it["target"]) == target:
+			out.append(it)
 	for it in menu:
 		if int(it["target"]) < 0:
 			out.append({"label": Words.action_label(it["action"], ""), "action": it["action"], "target": -1})

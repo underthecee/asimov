@@ -13,13 +13,15 @@ A row:
   who      who may choose it. "mind": a mind may (its deliberation, where it has a `menu` line; a plan block
            or an intent step, where it has a `step` rank). "player": a player's act may name it. "rule": only
            a rule of the world starts it.
-  takes    what it names: None, "person" (a villager's id), "place" (a place on the map), "tile" ([x, y]) or
-           "line" (a person and the words said to them).
+  takes    what it names: None, "person" (a villager's id), "place" (a place on the map), "tile" ([x, y]),
+           "line" (a person and the words said to them), "thing" (a thing's id; things-1) or "gift" (a thing
+           and the person it is handed to).
   among    for a mind's person verb, the ids its reply may name: "kin_here", "present" or "people".
   needs    what must hold for it to work. "awake" and "free" (the body is not held by an act before it) are
            the player's body's; "cooldown" holds a player's rolled act to the deliberation cooldown; the rest
            say what the handler checks: "reach" (the target at one place with the body, or within a tile),
-           "sight", "kin", "market", "coin", "food", "ask" (an ask aimed at the body), "walker".
+           "sight", "kin", "market", "coin", "food", "ask" (an ask aimed at the body), "walker", "beside" (the
+           thing on the body's tile or the next one), "carried" (the thing in its hands), "hands" (a hand free).
   cost     sim-minutes the act holds the player's body (B2.3). 0: words, answers, a walk, a call.
   kind     how it runs. "now": it settles where the body is when it applies. "ask": the same, and its
            target may say no. "reach": the body goes to its
@@ -38,6 +40,8 @@ A row:
   reasons  the `why` its receipt can carry, beyond those any act of its user can (ANY_ACT, PLAYER_ONLY,
            OFFERED). Each is a key of REASONS, which holds its words.
 """
+
+from . import things
 
 MINUTE = 60  # a sim-minute in the tick's 600ths (sim.SUB // 10): the unit of a verb's cost
 
@@ -151,6 +155,20 @@ VERBS = {
     "hail": _row(("player",), "_do_hail", takes="person", needs=("awake", "sight", "walker"), cost=0,
                  reasons=("hailed", "already stopped", "unknown target", "target not in sight", "not walking"),
                  label="Call out to %s", short="call out", doing="call out to"),
+    # things-1 (B3): what a player does with a thing. The thing's kind (things.THINGS) says whether it can
+    # be carried and what using it does, and words the label; a fixture's use is the verb done there, whose
+    # own row gives that receipt's reasons.
+    "take": _row(("player",), "_do_thing", takes="thing", needs=BODY + ("beside", "hands"),
+                 reasons=("took", "nothing there", "not in reach", "can't be carried", "hands full", "already carried"),
+                 doing="pick it up"),
+    "drop": _row(("player",), "_do_thing", takes="thing", needs=BODY + ("carried",),
+                 reasons=("dropped", "nothing there", "not carried"), doing="put it down"),
+    "use": _row(("player",), "_do_thing", takes="thing", needs=BODY + ("beside",),
+                reasons=("picked", "nothing there", "not in reach", "no use", "not yours"), doing="use it"),
+    "hand": _row(("player",), "_do_thing", takes="gift", needs=BODY + ("carried", "reach"),
+                 reasons=("handed", "nothing there", "not carried", "unknown target", "target not here", "target asleep",
+                          "target hands full"),
+                 doing="hand it over"),
     # A plan's block or an intent's step, never an action on the menu (go_market is).
     "shop": _row(("mind",), "_do_step", needs=("coin",), kind="activity", step=6,
                  reasons=("heading to market", "bought", "had enough", "no coin", "no stock", "time ran out"),
@@ -237,6 +255,19 @@ REASONS = {
     "already stopped": {"you": "they're already waiting for you"},
     "not walking": {"you": "they aren't walking by"},
     "target not in sight": {"you": "they're too far to hear you"},
+    "took": {"you": "you have it now"},
+    "dropped": {"you": "it lies where you stood"},
+    "handed": {"you": "they take it"},
+    "picked": {"you": "you have %d more food"},
+    "nothing there": {"you": "it isn't there any more"},
+    "not in reach": {"you": "it's too far to reach; stand on it or beside it"},
+    "can't be carried": {"you": "it can't be carried"},
+    "hands full": {"you": "your hands are full; put something down first"},
+    "already carried": {"you": "you're already carrying it"},
+    "not carried": {"you": "you aren't carrying it"},
+    "no use": {"you": "there's nothing to do with it"},
+    "not yours": {"you": "it isn't yours to use"},
+    "target hands full": {"you": "their hands are full"},
 }
 
 
@@ -266,6 +297,8 @@ GO_ACTS = _names(lambda r: r["takes"] == "place")
 SAY_ACTS = _names(lambda r: r["takes"] == "line")
 WALK_ACTS = _names(lambda r: r["takes"] == "tile")
 HAIL_ACTS = _names(lambda r: "walker" in r["needs"])
+THING_ACTS = _names(lambda r: r["takes"] in ("thing", "gift"))            # things-1: an act that names a thing
+HAND_ACTS = _names(lambda r: r["takes"] == "gift")                        # and the person it goes to
 NO_TARGET = [name for name in DELIBERATE_ACTIONS if VERBS[name]["takes"] is None]   # the reply schema's lists
 PERSON_ACTIONS = tuple((name, VERBS[name]["among"]) for name in DELIBERATE_ACTIONS if VERBS[name]["takes"] == "person")
 MENU = {name: VERBS[name]["words"]["menu"] for name in DELIBERATE_ACTIONS}
@@ -316,7 +349,9 @@ def client_words() -> dict:
             "ASKED": col("asked"), "VERB": state("plan"), "NOW": state("now"),
             "WHY": why("you"), "TO_YOU": why("to_you"), "BY_THEM": why("by_them"),
             "HERE_ONLY": list(INSTANT_STEPS), "RATED": list(RATED_ACTS),
-            "PLAYER_ACTIONS": list(PLAYER_ACTIONS)}
+            "PLAYER_ACTIONS": list(PLAYER_ACTIONS), "THING_ACTS": list(THING_ACTS),
+            # things-1: a thing's name and the label of each verb its kind allows (things.THINGS)
+            **{"THING_" + key.upper(): words for key, words in things.client_words().items()}}
 
 
 GD_HEAD = """# Written by `python -m asiimov.verbs` from the verb table (asiimov/verbs.py, verbs-1). Don't edit it here:
@@ -339,7 +374,9 @@ def client_gd() -> str:
 
 
 # The player's verbs the client words in its own panels (the map, the Talk box, the keys), so they carry no label.
-_UNLABELLED = {"go_to": "Walk to a place on the map", "say": "Say a line to someone", "walk": "Step to the next tile"}
+_UNLABELLED = {"go_to": "Walk to a place on the map", "say": "Say a line to someone", "walk": "Step to the next tile",
+               "take": "Pick up a thing beside you", "drop": "Put down a thing you carry",
+               "use": "Use a thing beside you or in your hands", "hand": "Hand a thing you carry to someone"}
 
 
 def player_list() -> str:
@@ -350,7 +387,8 @@ def player_list() -> str:
         w = row["words"]
         what = (w.get("label") or _UNLABELLED[name]).replace("%s", "someone")
         names = {None: "", "person": ", naming a villager", "place": ", naming a place", "tile": ", naming a tile",
-                 "line": ", naming a villager, with the words"}[row["takes"]]
+                 "line": ", naming a villager, with the words", "thing": ", naming a thing",
+                 "gift": ", naming a thing and a villager"}[row["takes"]]
         held = f"holds the body {row['cost']} sim-minute" if row["cost"] else "costs the body no time"
         lines.append(f"- `{name}`: {what}{names}; {held}.")
     return "\n".join(lines) + "\n"
