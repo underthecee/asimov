@@ -64,9 +64,10 @@ func _start() -> void:
 	wm.add_event({"tick": 8, "kind": "moved", "actor": 0, "data": {"from": [3, 4], "pos": [0, 8], "place": null}})
 	wm.add_event({"tick": 9, "kind": "activity", "actor": 0, "data": {"activity": "home", "place": "home_0", "arrive": 10, "from": [0, 8]}})
 	wm.add_event({"tick": 10, "kind": "arrive", "actor": 0, "data": {"place": "home_0"}})
-	if wm.position(0, 5) != Vector2i(20, 20) or wm.position(0, 6) != Vector2i(3, 4) or wm.position(0, 8) != Vector2i(3, 4) \
+	var home: Vector2i = wm.slot("home_0", 0)  # space-1: at home it stands on its slot, a tile of the home
+	if wm.place_at(home) != "home_0" or wm.position(0, 5) != home or wm.position(0, 6) != Vector2i(3, 4) or wm.position(0, 8) != Vector2i(3, 4) \
 			or wm.state_at(0, 7)[1] != "plaza" or wm.position(0, 9) != Vector2i(0, 8) or wm.state_at(0, 9)[1] != null \
-			or wm.present("plaza", 9) != [] or wm.state_at(0, 10)[2]["from"] != [0, 8] or wm.position(0, 11) != Vector2i(20, 20):
+			or wm.present("plaza", 9) != [] or wm.state_at(0, 10)[2]["from"] != [0, 8] or wm.position(0, 11) != home:
 		return _fail("the world model doesn't place a walked body: %s" % [wm.moves[0]])
 	var a := OS.get_cmdline_user_args()
 	me.scope = "inhabitant"

@@ -50,8 +50,8 @@ def open_tile(sim):
 def walk_to(sim, tile, acts=()):
     """Walk the body to `tile`, a tick at a time, then run `acts` on the tick it gets there."""
     b = sim.state["agents"][sim.state["player"]["agent"]]
-    while sim._pos(b) != list(tile):
-        last = distance(sim._pos(b), tile) <= WALK
+    while sim.tile(b) != list(tile):
+        last = distance(sim.tile(b), tile) <= WALK
         sim.step([walk(*tile)] + (list(acts) if last else []))
         assert not state_violations(sim), sim.state["tick"]
 
@@ -88,7 +88,7 @@ def test_every_anchor_is_in_its_own_place_and_a_shared_tile_has_one_owner():
 def test_a_step_lands_on_the_tile_and_the_engine_says_which_place_it_is():
     sim, b = awake_body()
     a = sim.state["agents"][b]
-    here, frm = a["place"], sim._pos(a)
+    here, frm = a["place"], sim.tile(a)
     rx, ry, w, h = sim.map["places"][here]["rect"]
     corner = [rx + w - 1, ry + h - 1]  # another tile of the place it is in
     sim.step([walk(*corner)])
@@ -96,7 +96,7 @@ def test_a_step_lands_on_the_tile_and_the_engine_says_which_place_it_is():
     assert m.data == {"from": frm, "pos": corner, "place": here} and m.origin == "rule"
     act = sim.events[m.parents[0]]
     assert act.kind == "act" and act.origin == "player" and act.data == {"action": "walk", "to": corner}
-    assert a["place"] == here and a["at"] == corner and a["route"] is None and sim._pos(a) == corner
+    assert a["place"] == here and a["at"] == corner and a["route"] is None and sim.tile(a) == corner
     assert inhabitant.view(sim, b)["pos"] == corner and inhabitant.view(sim, b)["place"] == here
     assert not state_violations(sim)
 
@@ -120,7 +120,7 @@ def test_it_walks_at_most_walk_tiles_a_tick_x_first_over_all_its_walks_that_tick
     sim, b = awake_body(n=120)  # a big map: the far corner is more than a tick away
     a = sim.state["agents"][b]
     x0, y0, x1, y1 = bounds(sim.map)
-    frm = sim._pos(a)
+    frm = sim.tile(a)
     far = max(([x0, y0], [x0, y1], [x1, y0], [x1, y1]), key=lambda c: distance(frm, c))
     assert abs(far[0] - frm[0]) > WALK // 2 and distance(frm, far) > 2 * WALK
     near = [frm[0] + (WALK // 2 if far[0] > frm[0] else -WALK // 2), frm[1]]
@@ -129,10 +129,10 @@ def test_it_walks_at_most_walk_tiles_a_tick_x_first_over_all_its_walks_that_tick
     assert first.data["pos"] == near
     assert distance(near, second.data["pos"]) == WALK - WALK // 2 and second.data["from"] == near
     assert third.data["pos"] == third.data["from"] == second.data["pos"]  # the tick's tiles are spent
-    assert distance(frm, sim._pos(a)) == WALK
+    assert distance(frm, sim.tile(a)) == WALK
     sim.step([walk(*far)])
-    assert distance(frm, sim._pos(a)) == 2 * WALK  # a new tick, a new WALK tiles
-    assert sim._pos(a)[1] == frm[1] or sim._pos(a)[0] == far[0]  # x first, then y
+    assert distance(frm, sim.tile(a)) == 2 * WALK  # a new tick, a new WALK tiles
+    assert sim.tile(a)[1] == frm[1] or sim.tile(a)[0] == far[0]  # x first, then y
     assert not state_violations(sim)
 
 
@@ -206,7 +206,7 @@ def test_a_walk_stops_a_route_where_the_body_is():
     sim.step([])
     assert a["route"] is not None
     sim.step([])
-    at = sim._pos(a)
+    at = sim.tile(a)
     sim.step([walk(*at)])  # stand here
     assert a["route"] is None and a["at"] == at and a["place"] == place_at(sim.map, at)
     assert moved(sim, b)[-1].data["from"] == at and not state_violations(sim)
@@ -433,7 +433,7 @@ def test_the_live_runner_takes_a_walk_with_a_tile_and_refuses_it_without(tmp_pat
     assert act.data == {"action": "walk", "to": inside}
     # asleep at this hour, so the engine's answer is a receipt, not a move
     assert next(e for e in events if e.parents and e.parents[0] == act.id).data["why"] == "asleep"
-    assert r.view()["agents"][1]["pos"] == r.sim._pos(r.sim.state["agents"][1])
+    assert r.view()["agents"][1]["pos"] == r.sim.tile(r.sim.state["agents"][1])
 
 
 def test_a_live_session_of_walks_equals_batch_and_replays(tmp_path):
@@ -458,7 +458,7 @@ def test_a_live_session_of_walks_equals_batch_and_replays(tmp_path):
         _, _, acks = r.step()
         assert all(a["status"] == "applied" for a in acks)
     v = inhabitant.view(r.sim, b)
-    assert v["pos"] == r.sim._pos(r.sim.state["agents"][b])
+    assert v["pos"] == r.sim.tile(r.sim.state["agents"][b])
     r.finish()
     events = read_jsonl(out + "/events.jsonl")
     assert sum(e.kind == "moved" for e in events) > 20

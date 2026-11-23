@@ -185,6 +185,24 @@ is the dev/review tool until a game design says what divine power costs.
   engine's tile when the keys are up and every walk is acked; it predicts nothing else.
 - This replaces the `walk {place}` idea under "What would change this": a tile, not a place.
 
+## Every body on a tile (space-1, plan/v0-contracts-spec.md B1)
+- `Sim.pos(a, t)` is a pure function of the state and a sim-time `t` in ticks, whole or a Fraction (the core
+  has no floats): the tile the player walked the body to; else a walker's point on its route at `t`
+  (`worldmap.position`, between tiles when `t` is); else its slot at its place. `Sim.tile(a, t)` is the floor.
+- A slot is a tile of the place's own tiles (`worldmap.own_tiles`: its rectangle's tiles that `place_at` gives
+  to it), picked by the id alone (`worldmap.slot`), so it never depends on who else is there. Two ids share a
+  tile only when they differ by a multiple of the place's tile count. Nothing is stored for a villager, routes
+  still run anchor to anchor, and a world with no player writes engine 38's log tick for tick: the no-player
+  bar, seeds 1 to 3 at 100 villagers over 3 days, log and every tick's state hash (tests/test_space.py).
+- `Sim.reach(a, b, t)`: at one place, or one of them in the open and their tiles at most 1 apart (Chebyshev).
+  `Sim.sees(a, b, t)`: at one place, or one of them in the open and at most 6 apart. Two places hide each other.
+  The inhabitant view's `seen` and what it witnesses use `sees`. The player's acts still need the target at
+  its place: reaching a walker in the open, and its stopping to listen, are reach-1, after time-1 (Steering
+  2026-11-23 18:49Z), because a walker's position between ticks can't be played before acts carry a time.
+- A walk sets out from the tile the body stands on (its slot, until it has walked), not from the anchor.
+- The client draws every body from these fields. `world_model.gd` mirrors `slot` and `position`, and
+  `tests/test_positions.gd` holds it to the engine at every tick boundary and at times inside a tick.
+
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical
    to the previous engine's apart from the genesis `engine` field, and the state hash at every

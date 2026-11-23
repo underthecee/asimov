@@ -53,6 +53,40 @@ def place_at(world_map: dict, pos) -> str | None:
     return None if best is None else best[1]
 
 
+SEE = 6    # tiles (Chebyshev) a body in the open sees, and is seen from (space-1, B1)
+REACH = 1  # tiles (Chebyshev) to what a body in the open can touch: its own tile or the next one
+
+
+def own_tiles(world_map: dict, place: str) -> list[list[int]]:
+    """The tiles of `place`: those of its rectangle that place_at gives to it, row by row. Never empty: a
+    place's anchor is its own."""
+    rx, ry, w, h = world_map["places"][place]["rect"]
+    return [[x, y] for y in range(ry, ry + h) for x in range(rx, rx + w) if place_at(world_map, [x, y]) == place]
+
+
+def _gcd(a: int, b: int) -> int:
+    while b:
+        a, b = b, a % b
+    return a
+
+
+def slot(tiles: list, aid: int) -> list[int]:
+    """Where villager `aid` stands among a place's `tiles` (space-1): keyed by its id alone, so it never
+    depends on who else is there and nothing is stored. Consecutive ids land far apart (a stride near the
+    golden section of the count, coprime with it), and two ids share a tile only when they differ by a
+    multiple of the count."""
+    n = len(tiles)
+    s = max(1, n * 618 // 1000)
+    while _gcd(s, n) != 1:
+        s += 1
+    return list(tiles[(aid * s + n // 2) % n])
+
+
+def near(a, b, tiles: int) -> bool:
+    """Whether two tiles are within `tiles` of each other, diagonals counting as one (Chebyshev)."""
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1])) <= tiles
+
+
 MARGIN = 4  # tiles of open ground around the places' rectangles that a body may stand on
 
 

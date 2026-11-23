@@ -23,6 +23,7 @@ var holdings := {}      # agent id -> [[tick, food, coin], ...]: what it holds a
 						# pack has these (tools/make_playback.py, from the engine's replay): a log alone doesn't
 						# carry them, and nothing here works them out
 var engine := ""        # the engine that wrote the world, from genesis
+var _own := {}          # place -> its own tiles, worked out once (the map never changes)
 
 
 func load_world(world: Dictionary) -> void:
@@ -34,6 +35,7 @@ func load_world(world: Dictionary) -> void:
 	ticks_per_day = int(world.get("ticks_per_day", 144))
 	moves.clear()
 	holdings.clear()
+	_own.clear()
 	for a in agents:
 		moves[int(a["id"])] = [[-1, families[int(a["family"])]["home"], null, "sleep", null]]
 
@@ -149,21 +151,79 @@ func anchor(place: String) -> Vector2i:
 	return Vector2i(int(a[0]), int(a[1]))
 
 
-func position(aid: int, view_tick: int) -> Vector2i:
-	## The engine's position at a tick boundary (worldmap.position): WALK tiles a tick along the L path, x first.
-	var s := state_at(aid, view_tick)
+func place_at(pos: Vector2i):
+	## worldmap.place_at: the place whose rectangle holds the tile (the nearer anchor, then the lower name, where
+	## two overlap), or null out in the open.
+	var best = null
+	var best_d := 0
+	for name in places:
+		var r = places[name]["rect"]
+		if pos.x >= int(r[0]) and pos.x < int(r[0]) + int(r[2]) and pos.y >= int(r[1]) and pos.y < int(r[1]) + int(r[3]):
+			var an := anchor(name)
+			var d := absi(pos.x - an.x) + absi(pos.y - an.y)
+			if best == null or d < best_d or (d == best_d and str(name) < str(best)):
+				best = name
+				best_d = d
+	return best
+
+
+func own_tiles(place: String) -> Array:
+	## worldmap.own_tiles: the tiles of the place's rectangle that place_at gives to it, row by row.
+	if not _own.has(place):
+		var r = places[place]["rect"]
+		var out := []
+		for y in range(int(r[1]), int(r[1]) + int(r[3])):
+			for x in range(int(r[0]), int(r[0]) + int(r[2])):
+				if place_at(Vector2i(x, y)) == place:
+					out.append(Vector2i(x, y))
+		_own[place] = out
+	return _own[place]
+
+
+static func _gcd(a: int, b: int) -> int:
+	while b != 0:
+		var t := b
+		b = a % b
+		a = t
+	return a
+
+
+func slot(place: String, aid: int) -> Vector2i:
+	## worldmap.slot (space-1): where villager `aid` stands at a place, keyed by its id alone. The engine derives
+	## it and stores nothing; this is the same arithmetic, and tests/test_positions.gd holds the two equal.
+	var tiles := own_tiles(place)
+	var n := tiles.size()
+	var s := maxi(1, n * 618 / 1000)
+	while _gcd(s, n) != 1:
+		s += 1
+	return tiles[(aid * s + n / 2) % n]
+
+
+func pos_at(aid: int, t: float) -> Vector2:
+	## Sim.pos (space-1, B1.1): where the body is at sim-time `t`, from the state at the view tick floor(t). The
+	## tile the player walked it to, its slot at a place, or its route at `t`, between tiles when `t` is.
+	var s := state_at(aid, int(floor(t)))
 	if s[2] == null:
-		return Vector2i(int(s[4][0]), int(s[4][1])) if s[4] != null else anchor(s[1])
-	var r: Dictionary = s[2]
-	var to := anchor(r["to"])
-	var x := int(r["from"][0])
-	var y := int(r["from"][1])
-	var left := walk * maxi(0, view_tick - int(r["depart"]))
-	var dx := mini(left, absi(to.x - x))
+		return Vector2(int(s[4][0]), int(s[4][1])) if s[4] != null else Vector2(slot(s[1], aid))
+	return route_pos(s[2], anchor(s[2]["to"]), walk, t)
+
+
+static func route_pos(r: Dictionary, to: Vector2i, walk_tiles: int, t: float) -> Vector2:
+	## worldmap.position: `walk_tiles` a tick along the L path from the route's `from`, x first, at any time.
+	var x := float(r["from"][0])
+	var y := float(r["from"][1])
+	var left := walk_tiles * maxf(0.0, t - float(r["depart"]))
+	var dx := minf(left, absf(to.x - x))
 	x += dx if to.x >= x else -dx
-	var dy := mini(left - dx, absi(to.y - y))
+	var dy := minf(left - dx, absf(to.y - y))
 	y += dy if to.y >= y else -dy
-	return Vector2i(x, y)
+	return Vector2(x, y)
+
+
+func position(aid: int, view_tick: int) -> Vector2i:
+	## The engine's tile at a tick boundary (Sim.tile): the floor of pos_at, which is whole at a whole tick.
+	var p := pos_at(aid, float(view_tick))
+	return Vector2i(int(floor(p.x)), int(floor(p.y)))
 
 
 func display_position(aid: int, t: float) -> Vector2:

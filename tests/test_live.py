@@ -83,7 +83,7 @@ def test_view_positions_are_the_engines_own_at_every_tick_boundary(tmp_path):
         view = runner.view()
         assert view["tick"] == runner.sim.state["tick"]
         for v, a in zip(view["agents"], runner.sim.state["agents"]):
-            assert v["pos"] == list(runner.sim._pos(a)) and v["place"] == a["place"]
+            assert v["pos"] == runner.sim.tile(a) and v["place"] == a["place"]
             walkers += v["route"] is not None
         runner.step()
     assert walkers > 10  # the day has walking in it, so routes were exercised

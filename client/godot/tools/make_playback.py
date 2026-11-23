@@ -18,6 +18,7 @@ place), for tests/test_playback.gd.
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 import sys
@@ -31,6 +32,23 @@ def read_log(path: str) -> bytes:
         path = os.path.join(path, "events.jsonl")
     with (gzip.open if path.endswith(".gz") else open)(path, "rb") as f:
         return f.read()
+
+
+def _tile(sim, a) -> list:
+    """The tile the client draws the body on (space-1). An engine before space-1 has no Sim.tile, and the
+    client draws its villagers on the same slots, which need only the map and the id: this checkout's
+    worldmap gives them, loaded by path because `asiimov` may be the older engine's (--engine)."""
+    if hasattr(sim, "tile"):
+        return sim.tile(a)
+    if a["route"] or "at" in a:
+        return list(sim._pos(a))
+    spec = importlib.util.spec_from_file_location(
+        "_worldmap_now", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "asiimov", "worldmap.py"))
+    wm = sys.modules.get("_worldmap_now")
+    if wm is None:
+        wm = sys.modules["_worldmap_now"] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wm)
+    return wm.slot(wm.own_tiles(sim.map, a["place"]), a["id"])
 
 
 def replay_frames(raw: bytes, every: int):
@@ -77,7 +95,7 @@ def replay_frames(raw: bytes, every: int):
         for a in agents:
             if a["place"] is not None:
                 present[a["place"]].append(a["id"])
-        return {"ticks": sim.state["tick"], "pos": [list(sim._pos(a)) for a in agents],
+        return {"ticks": sim.state["tick"], "pos": [_tile(sim, a) for a in agents],
                 "place": [a["place"] for a in agents], "food": [a["inv"]["food"] for a in agents],
                 "coin": [a["inv"]["coin"] for a in agents], "present": dict(present)}
 

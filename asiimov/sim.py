@@ -30,7 +30,7 @@ from .memory import (REFLECT_ASK, assemble_decide, assemble_prompt, is_bare_valu
 from .minds import MindRequest, ReplayDivergence, dispatch
 from .params import generate_population
 from .rng import Rng
-from .worldmap import WALK, build_map, on_map, place_at, position, step_toward, travel_ticks
+from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, travel_ticks
 
 TICKS_PER_DAY = 144
 VILLAGE_WAKE_MIN = 390  # 06:30
@@ -308,7 +308,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "39"  # 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "space-1"  # space-1: every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -1063,6 +1063,40 @@ class Sim:
         if not a["route"]:  # walk-1: a body the player walked stands on its own tile, in a place or in the open
             return list(a["at"]) if "at" in a else places[a["place"]]["anchor"]
         return position(a["route"], places[a["route"]["to"]]["anchor"], self.state["tick"])
+
+    def pos(self, a: dict, t=None) -> list:
+        """Where the body is at sim-time `t`, in ticks (space-1, B1.1): a pure function of the state, with `t`
+        at or after the state's tick and whole or a Fraction; the state's tick when left out. Derived, never
+        stored, but for a body the player walked (a["at"]). A villager at a place stands on its slot there,
+        keyed by its id; a walker is where its route puts it at `t`, between tiles when `t` is. Routes still
+        run anchor to anchor (`_pos`), so no log of a world with no player changes."""
+        if a["route"]:
+            return position(a["route"], self.map["places"][a["route"]["to"]]["anchor"],
+                            self.state["tick"] if t is None else t)
+        if "at" in a:
+            return list(a["at"])
+        tiles = self.__dict__.setdefault("_own_tiles", {})
+        if a["place"] not in tiles:
+            tiles[a["place"]] = own_tiles(self.map, a["place"])
+        return slot(tiles[a["place"]], a["id"])
+
+    def tile(self, a: dict, t=None) -> list[int]:
+        """The tile the body stands on at `t`: the floor of each coordinate of pos()."""
+        return [int(v // 1) for v in self.pos(a, t)]
+
+    def reach(self, a: dict, b: dict, t=None) -> bool:
+        """Whether the two can touch at `t` (B1.3): at one place, or one of them in the open and their tiles
+        at most REACH apart."""
+        if a["place"] is not None and b["place"] is not None:
+            return a["place"] == b["place"]
+        return near(self.tile(a, t), self.tile(b, t), REACH)
+
+    def sees(self, a: dict, b: dict, t=None) -> bool:
+        """Whether the two see each other at `t` (B1.4): at one place, or one of them in the open (walking, or
+        a player's body standing there) and their tiles at most SEE apart. Two places hide each other."""
+        if a["place"] is not None and b["place"] is not None:
+            return a["place"] == b["place"]
+        return near(self.tile(a, t), self.tile(b, t), SEE)
 
     def _together(self, a: dict, b: dict) -> bool:
         """Both have arrived at one place. Two walkers are never together. Every person action, talk and
@@ -2765,7 +2799,7 @@ class Sim:
         if tick >= a["sleep_tick"] or a["needs"]["fatigue"] >= 1000:
             return self._receipt(a, eid, "walk", False, "bedtime")  # the world walks it home, as for any act
         used = p["walk"][1] if p.get("walk", [None])[0] == tick else 0
-        frm = self._pos(a)
+        frm = self.tile(a)  # space-1: its first step sets out from where it stands in the place, not the anchor
         pos = step_toward(frm, to, WALK - used)
         was, place = a["place"], place_at(self.map, pos)
         p["walk"] = [tick, used + abs(pos[0] - frm[0]) + abs(pos[1] - frm[1])]

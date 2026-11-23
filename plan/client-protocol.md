@@ -63,12 +63,20 @@ It gets:
   chance-stream fields.
 - `tick.view`, built field by field from `inhabitant.VIEW_KEYS`: `tick, place, route, pos, activity,
   asleep, hunger, food, coin, plan` (activity, start_h, end_h), `recent, present` (id, name, role, kin,
-  has_food, pos), `kin` (id, name, home), `market_food` (at the market only), `occasion` (why, who,
+  has_food, pos), `seen` (space-1, below), `kin` (id, name, home), `market_food` (at the market only), `occasion` (why, who,
   text), `offer` and `cooldown_until`. `offer` maps each action a deliberation would be offered from
   here to the people it may name (empty for non-person actions). The engine checks again when the act
   applies, so an act can still get `"not offered"`. A field added later needs a spec line.
   With walk-1, `pos` is the tile the engine holds for a walked body, and `place` and `route` are both null
   while it stands in the open (`present` is then empty and `offer` holds only what needs nobody).
+  With space-1 (plan/v0-contracts-spec.md, B1) every `pos` is the tile the body stands on: for someone at a
+  place its slot there, a tile of that place keyed by its id, which the engine derives and never stores; for
+  a walker the tile its route puts it on. `seen` lists those in sight who aren't in `present`: with the body
+  or them out in the open, everyone within 6 tiles (diagonals count as one). Each is `{id, name, role, asleep,
+  place, pos, route}`, with `route` as the view's own (`from, to, depart, arrive`) so a client can draw a
+  walker between ticks with worldmap.position. Seen is not in reach: nothing is offered toward them. Events
+  by those in `seen` are witnessed on their tick as events by those in `present` are. Two places hide each
+  other, however close their tiles.
 
 "Both" (an inhabitant and a god connection held by one person, gated on run.json `"divine": true`) is
 not enforced yet. God scope is the dev and review tool until a game design says what divine power
