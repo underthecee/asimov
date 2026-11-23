@@ -386,7 +386,7 @@ def test_hostile_minds_and_lines_keep_every_invariant_and_replay_exactly(seed, t
             again = Sim.restore(snap, sim.events, sim.mind)
             assert again.state_hash() == sim.state_hash()
     said = {e.id: e for e in sim.events if e.kind == "said"}
-    done = [e for e in sim.events if e.kind == "deal"]
+    done = [e for e in sim.events if e.kind == "deal" and e.data["move"] != "trade"]  # goods-1: a supply buy is a rule's deal
     for d in done:
         line = said[next(p for p in d.parents if p in said)]
         assert ("move" not in line.data) == ("typed" in d.data)

@@ -31,6 +31,17 @@ func _init() -> void:
 			"data": {"move": "wants_to_buy_food", "from": 4, "to": 3, "food": 1, "coin": 5, "ok": true}}, me_d, names)
 	var failed := Words.describe({"kind": "deal", "actor": 4, "origin": "rule",
 			"data": {"move": "asks_food", "from": 4, "to": 3, "food": 1, "ok": false, "why": "nothing to spare"}}, me_d, names)
+	# goods-1: a supply buy reads as a sale of the good, whichever side you are on, and a made unit as made
+	var from_me := Words.describe({"kind": "deal", "actor": 4, "origin": "rule",
+			"data": {"move": "trade", "from": 3, "to": 4, "tools": 2, "coin": 2, "ok": true}}, me_d, names)
+	var others := Words.describe({"kind": "deal", "actor": 4, "origin": "rule",
+			"data": {"move": "trade", "from": 9, "to": 4, "seed": 1, "coin": 1, "ok": true}}, me_d, {4: "Ari", 9: "Sil"})
+	var made := Words.describe({"kind": "made", "actor": 3, "origin": "rule", "data": {"tools": 1}}, me_d, names)
+	if not ("Ari bought 2 tools from you for 2 coin." in from_me) or others != "Ari bought 1 seed and feed from Sil for 1 coin." \
+			or made != "You make 1 tools.":
+		printerr("goods-1 doesn't read right: %s | %s | %s" % [from_me, others, made])
+		quit(1)
+		return
 	if not ("offering 5 coin for 1 food" in asked) or not ("Ari gave you 1 food." in gave) \
 			or not ("You bought 1 food from Ari for 5 coin." in sold) or not ("nothing to spare" in failed and "Ari said yes" in failed):
 		printerr("talk-1 doesn't read right: %s | %s | %s | %s" % [asked, gave, sold, failed])

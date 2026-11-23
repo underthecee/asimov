@@ -68,8 +68,10 @@ ACT_FIELDS = {
     "arrive": ("place",),
     "produce": ("food", "coin"),
     "sell": ("food",),
+    "made": ("seed", "tools"),  # goods-1: a unit of work also makes the trade's good
+    "deal": ("move", "from", "to", "seed", "tools", "food", "coin", "ok", "why"),  # a supply buy (goods-1); talk's deals
 }
-NOT_ACTS = ("day_rhythm", "plan_receipt", "tithe", "stock", "sick", "recover", "alms", "sick_news", "trade_due")  # B5 rules: tithe takes coin; stock places
+NOT_ACTS = ("day_rhythm", "plan_receipt", "tithe", "stock", "sick", "recover", "alms", "sick_news", "trade_due", "used")  # B5 rules: tithe takes coin; stock places
 # the harvest day's winter order, whose shop trip and buy are the acts; sick, recover and alms happen to the agent
 CHATS = ("talk", "snub")  # chance encounters: whom an agent happens to talk to where it is
 CATEGORIES = ("act", "act_besides_chats", "thought")

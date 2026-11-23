@@ -218,7 +218,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "37": "fe59f5e4ba19f7f35cc67a0382e466367abe13cbffc12bfeae5bfeffc770bb2f",  # text-1 with apart-1 and think-1 (#101), a typed ask settled by the private yes; no say: only the engine field differs
           "apart-1": "f44c05e0c7390243a435a973ea22852b19cfe2b15983a70e12621e4255810e5c",  # apart-1: no yes offered in talk once the two have parted, on text-1 and 36, before its number; no say: only the engine field differs
           "pace-2": "bc1893ff9e820624e8aeacda5927a9bfa434bde68303e685bf57762fff731655",  # pace-2: held plan/reflect calls fly to t+2, on 37, before its number; no player held: only the engine field differs
-          "38": "f0221edafa0e75fc34bf9ff766c09b507c6d2d1a09ea794227b152ca0bdae583"}  # pace-2 (#104), held plan/reflect calls fly to t+2; no player held: only the engine field differs
+          "38": "f0221edafa0e75fc34bf9ff766c09b507c6d2d1a09ea794227b152ca0bdae583",  # pace-2 (#104), held plan/reflect calls fly to t+2; no player held: only the engine field differs
+          "goods-1a": "2b236d37003dd719e89830de18672f86b09fcfd5a6ee474fdcd8fd93b48e1447"}  # goods-1a: a trade's input is a good made at work, sold from stock and used up a day at a time, on 38, before its number; the no-player log changes (G1 and G3w are re-read)
 
 
 def test_log_changes_bump_the_engine_version():
