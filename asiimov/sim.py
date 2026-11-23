@@ -1670,7 +1670,10 @@ class Sim:
         cands = [o["id"] for o in ag if o["role"] == need and o["family"] != a["family"] and o["id"] != s]
         if not cands:
             return None
-        pick = min(cands, key=lambda o: (load.get(str(o), 0), self.rng.raw(f"supplier:{a['id']}:{need}", o), o))
+        g = self._goods()
+        stock = ((lambda o: -ag[o]["inv"][TRADE_GOOD[need]]) if g and g.get("pick") == "stock"
+                 else (lambda o: ag[o]["inv"][TRADE_GOOD[need]] == 0) if g and g.get("pick") == "has" else (lambda o: 0))
+        pick = min(cands, key=lambda o: (stock(o), load.get(str(o), 0), self.rng.raw(f"supplier:{a['id']}:{need}", o), o))
         if s is not None:
             load[str(s)] -= 1
         load[str(pick)] = load.get(str(pick), 0) + 1
