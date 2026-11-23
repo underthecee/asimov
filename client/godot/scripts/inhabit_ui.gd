@@ -29,6 +29,7 @@ const WHY := {"heading to market": "you head to the market", "started": "you sta
 		"going to see them": "you go to see them", "taking them something": "you take them something",
 		"keeping away": "you keep away", "carrying on": "you carry on",
 		"supplied": "you buy what your work needs",
+		"none to sell": "they had none to sell",
 		"not offered": "it wasn't possible any more by the time it came up",
 		"cooldown": "too soon after your last ask; wait a little", "unknown target": "they aren't here any more",
 		"target not here": "they aren't here any more", "target asleep": "they're asleep",
@@ -49,7 +50,8 @@ const TO_YOU := {"gave": "you gave them 1 food", "sold": "you sold them 1 food",
 		"kin gave food": "you gave them food", "kin refused": "you said no", "stolen": "they stole food from you",
 		"caught": "you caught them stealing", "nothing to spare": "you had nothing to spare",
 		"kin has nothing to spare": "you had nothing to spare", "target asleep": "you were asleep",
-		"target not here": "you weren't there any more", "no coin": "they couldn't pay", "target has no food": "you had no food"}
+		"target not here": "you weren't there any more", "no coin": "they couldn't pay", "target has no food": "you had no food",
+		"none to sell": "you had none to sell"}
 const ANSWERS := ["gave", "sold", "refused", "kin gave food", "kin refused"]  # an ask's yes or no
 # What a villager did with your own act aimed at them, by name (%s): the outcome first, then the why.
 const BY_THEM := {"refused": "%s said no.", "kin refused": "%s said no.", "nothing to spare": "%s had nothing to spare.",
@@ -61,7 +63,7 @@ const ASKING := {"ask_kin": "You asked %s for food", "ask_food": "You asked %s f
 		"steal": "You tried to steal food from %s", "give_food": "You gave food to %s", "give_coin": "You gave a coin to %s"}
 const ASKED := {"ask_kin": "asked you for food", "ask_food": "asked you for food", "buy_from": "wanted to buy food from you",
 		"steal": "tried to steal from you", "give_food": "gave you food", "give_coin": "gave you a coin",
-		"seek": "came to see you"}
+		"seek": "came to see you", "trade": "came to buy what their work needs from you"}
 const HERE_ONLY := ["ask_kin", "ask_food", "buy_from", "steal"]  # sim.INSTANT_STEPS: refused with the target elsewhere
 const RATED := ["ask_kin", "ask_food", "buy_from", "steal", "buy_food"]  # held to the cooldown (sim.RATED_ACTS)
 
@@ -158,6 +160,11 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 			return "You harvest %d food." % int(d.get("food", 0))
 		"sell":
 			return "%s sell%s %d food at the market." % [a, "" if mine else "s", int(d.get("food", 0))]
+		"made":  # goods-1: a unit of work also makes the trade's good
+			for g in GOODS:
+				if d.has(g):
+					return "%s make%s %d %s." % [a, "" if mine else "s", int(d[g]), GOODS[g]]
+			return ""
 		"tithe":
 			return "You pay %d coin to the village chest." % int(d.get("coin", 0))
 		"stock":
@@ -289,10 +296,23 @@ const DEAL_WHY := {"not together": "you're no longer together", "asleep": "they 
 		"nothing to spare": "they have nothing to spare now", "no coin": "you don't have the coin now"}
 
 
+const GOODS := {"seed": "seed and feed", "tools": "tools"}  # goods-1: sim.TRADE_GOOD's counts, as sim.TRADE_INPUT words them
+
+
 static func deal_line(d: Dictionary, me_id: int, names: Dictionary) -> String:
 	## talk-1: "Vone gave you 1 food", "You bought 1 food from Vone for 6 coin", or why a yes didn't settle.
+	## goods-1: a supply buy, "Ari bought 1 tools from you for 1 coin".
 	var giver := _who(d.get("from"), me_id, names, true)
 	var to := _who(d.get("to"), me_id, names)
+	if str(d.get("move", "")) == "trade":
+		var what := ""
+		for g in GOODS:
+			if d.has(g):
+				what = "%d %s" % [int(d[g]), GOODS[g]]
+		var buyer := _who(d.get("to"), me_id, names, true)
+		var line := "%s bought %s from %s for %d coin." % [buyer, what, _who(d.get("from"), me_id, names), int(d.get("coin", 0))]
+		var yours: bool = (d.get("to") != null and int(d["to"]) == me_id) or (d.get("from") != null and int(d["from"]) == me_id)
+		return "[color=#80d080]%s[/color]" % line if yours else line
 	var buy: bool = str(d.get("move", "")) == "wants_to_buy_food"
 	if not d.get("ok", false):
 		var why: String = DEAL_WHY.get(str(d.get("why", "")), str(d.get("why", "")))

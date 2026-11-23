@@ -5,7 +5,7 @@ unattended run (asiimov/soak.py, which counts them and keeps going). Each check 
 violation strings instead of raising, so a long run can report every one it hits.
 """
 from .events import ORIGINS, Event
-from .sim import PERSON_STEPS, RULE_STEPS, STEP_DOS, Sim
+from .sim import GOODS_KEYS, PERSON_STEPS, RULE_STEPS, STEP_DOS, TRADE_GOOD, Sim
 from .worldmap import on_map, place_at, travel_ticks
 
 BOOL_FIELDS = ("asleep", "has_food", "kin", "talk")  # talk: an answer's own hold (say-3)
@@ -101,6 +101,9 @@ def deal_violations(events: list[Event], start: int = 0, possessed=None) -> list
         if e.kind != "deal":
             continue
         d = e.data
+        if d.get("move") == "trade":
+            out += trade_deal_violations(events, e)
+            continue
         typed = "typed" in d
         said = next((events[p] for p in e.parents if events[p].kind == "said"), None)
         mind = next((events[p] for p in e.parents if events[p].kind == "mind_answer"), None)
@@ -128,6 +131,49 @@ def deal_violations(events: list[Event], start: int = 0, possessed=None) -> list
                     or dec.data.get("move") != d["move"] or dec.id >= mind.id or (d["ok"] and not yes):
                 out.append(f"event {e.id}: deal without the listener's own earlier yes to this speaker")
     return out
+
+
+def trade_deal_violations(events: list[Event], e: Event) -> list[str]:
+    """goods-1 (contracts B5.6): a supply buy's `deal` is the buyer's act. It cites the buyer's own `trade_due` naming
+    the seller, moves at least one unit of the one good the seller's trade makes, for the price a unit in coin, and
+    the buyer's receipt for the run follows at once and cites it."""
+    d, pop = e.data, events[0].data["population"]
+    tr = pop.get("stakes", {}).get("trade", {})
+    if not any(k in tr for k in GOODS_KEYS):
+        return [f"event {e.id}: trade deal in a world without goods"]
+    due = events[e.parents[0]] if e.parents else None
+    good = TRADE_GOOD.get(pop["agents"][d["from"]]["role"]) if type(d.get("from")) is int else None
+    n = d.get(good) if good else None
+    ok = (d.get("ok") is True and e.actor == d.get("to") and d["from"] != d["to"] and good is not None
+          and type(n) is int and n >= 1 and d.get("coin") == n * tr["price"]
+          and set(d) == {"move", "from", "to", good, "coin", "ok"}
+          and due is not None and due.kind == "trade_due" and due.actor == d["to"] and due.data["to"] == d["from"])
+    r = events[e.id + 1] if e.id + 1 < len(events) else None
+    cited = (r is not None and r.kind == "receipt" and r.actor == e.actor and e.id in r.parents
+             and r.data.get("action") == "trade" and r.data.get("ok") is True and r.data.get("to") == d.get("from")
+             and r.data.get("coin") == d.get("coin"))
+    return [] if ok and cited else [f"event {e.id}: trade deal {d} cites {e.parents}"]
+
+
+def goods_violations(sim: Sim) -> list[str]:
+    """goods-1: a villager holds no more of its own good than `hold`, no more of an input than `ahead` days' worth,
+    and none of a good it neither makes nor needs."""
+    tr = sim._goods()
+    if not tr:  # a world on supply-1's stamps, or with no trade: nobody holds a good at all
+        return [f"agent {a['id']} holds {g} in a world without goods"
+                for a in sim.state["agents"] for g in TRADE_GOOD.values() if g in a["inv"]]
+    out = []
+    for a in sim.state["agents"]:
+        needs = {TRADE_GOOD[n] for n in tr["needs"].get(a["role"], [])}
+        for g in TRADE_GOOD.values():
+            cap = tr["hold"] if TRADE_GOOD.get(a["role"]) == g else tr["ahead"] if g in needs else 0
+            if not 0 <= a["inv"][g] <= cap:
+                out.append(f"agent {a['id']} ({a['role']}) holds {a['inv'][g]} {g}, cap {cap}")
+    return out
+
+
+def goods_totals(sim: Sim) -> dict:
+    return {g: sum(a["inv"].get(g, 0) for a in sim.state["agents"]) for g in TRADE_GOOD.values()}
 
 
 def state_violations(sim: Sim) -> list[str]:
@@ -213,6 +259,7 @@ class Checker:
         """Call right before sim.step(acts)."""
         sim = self.sim
         self._tick, self._n0, self._totals = sim.state["tick"], len(sim.events), totals(sim)
+        self._goods = goods_totals(sim)
         self._chest = sim.state.get("chest", 0)
         self._price, self._sell = sim._price(), sim._sell_price()  # in force for the whole step (B5 year-1)
         burned = {act["family"] for act in acts if act["kind"] == "fire"}  # two fires on one family burn once
@@ -244,6 +291,11 @@ class Checker:
         chest = sim.state.get("chest", 0)
         if chest - self._chest != tithed - spent - alms or chest < 0:
             out.append(f"chest ledger: {chest - self._chest} vs {tithed - spent - alms}")
+        for g, held in goods_totals(sim).items():  # goods-1: a good is made only at work and goes only by use
+            want = sum(e.data.get(g, 0) for e in new if e.kind == "made") - sum(e.data.get(g, 0) for e in new if e.kind == "used")
+            if held - self._goods[g] != want:
+                out.append(f"{g} ledger: {held - self._goods[g]} vs {want}")
+        out += goods_violations(sim)
         out += state_violations(sim)
         out += log_violations(sim.events, n0)
         out += presence_violations(sim.events, n0, self.where)

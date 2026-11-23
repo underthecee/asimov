@@ -19,7 +19,8 @@ SEEN = {"activity": ("activity", "place", "arrive", "from"), "arrive": ("place",
         "sleep": (), "talk": ("with", "place", "gossip"), "meet": ("with", "place"), "snub": ("with",),
         "eat": ("household",), "sell": ("food",), "fire": ("family",), "ask": ("action", "to"),
         "said": ("with", "text", "place", "move", "price"), "reply": ("with", "says", "answer"),  # say-1, talk-1
-        "deal": ("move", "from", "to", "food", "coin", "ok", "why")}  # talk-1: what a yes moved, in plain sight
+        # talk-1: what a yes moved, in plain sight; goods-1: and a supply buy's seed or tools
+        "deal": ("move", "from", "to", "food", "coin", "ok", "why", "seed", "tools")}
 SEEN_NAMING = {**SEEN, "receipt": ("action", "ok", "why", "to", "answered")}  # also a receipt for an act aimed at it
 # Another's act aimed at it that failed before reaching it: it saw nothing (and "no coin" would show another's
 # purse). Kept when it settles a held ask (parents beyond the act: the ask), which the villager did see.

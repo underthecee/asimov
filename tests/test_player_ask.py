@@ -54,7 +54,7 @@ def scene(action="ask_food"):
                 b["inv"]["food"], a["inv"]["coin"] = 5, 50
                 pos = next(e.id for e in sim.events if e.kind == "possess")
                 a["override"] = None
-                a["supplied"] = {n: sim.state["tick"] // TICKS_PER_DAY for n in sim._trade_needs(a)}  # no supply run
+                a["trade_try"] = {n: sim.state["tick"] // TICKS_PER_DAY for n in sim._trade_needs(a)}  # no supply run
                 a["intent"] = {"goal": "get food", "steps": [{"do": action, "target": b["id"]}], "i": 0,
                                "event": pos, "tick": sim.state["tick"], "left": 6}
                 return sim, a["id"], b["id"], player

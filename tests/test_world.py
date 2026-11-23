@@ -220,7 +220,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "pace-2": "bc1893ff9e820624e8aeacda5927a9bfa434bde68303e685bf57762fff731655",  # pace-2: held plan/reflect calls fly to t+2, on 37, before its number; no player held: only the engine field differs
           "38": "f0221edafa0e75fc34bf9ff766c09b507c6d2d1a09ea794227b152ca0bdae583",  # pace-2 (#104), held plan/reflect calls fly to t+2; no player held: only the engine field differs
           "walk-1": "3296b5cca558495ecec9ebbb5c0f8b8a8b37f6d1e3537733d147c67721f6adf4",  # walk-1: the player walks its body tile by tile, on 38, before its number; no walk: only the engine field differs
-          "39": "80e0303b704a8d019f0edb3d4d73cbd50c8a3acc8accf66b6184b02dbace189d"}  # walk-1 (#110), the player walks its body tile by tile; no walk: only the engine field differs
+          "39": "80e0303b704a8d019f0edb3d4d73cbd50c8a3acc8accf66b6184b02dbace189d",  # walk-1 (#110), the player walks its body tile by tile; no walk: only the engine field differs
+          "goods-1a": "2b236d37003dd719e89830de18672f86b09fcfd5a6ee474fdcd8fd93b48e1447"}  # goods-1a: a trade's input is a good made at work, sold from stock and used up a day at a time, on 39, before its number; the no-player log changes (G1 and G3w are re-read)
 
 
 def test_log_changes_bump_the_engine_version():

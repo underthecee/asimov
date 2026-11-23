@@ -60,8 +60,10 @@ def test_walk_is_the_players_alone():
     assert "walk" in PLAYER_ACTIONS and "walk" not in DELIBERATE_ACTIONS
 
 
-def test_a_world_with_no_walk_is_engine_38_but_for_the_version_field():
+def test_a_world_with_no_walk_is_engine_38_but_for_the_version_field(monkeypatch):
+    from test_goods import on_38
     from test_world import FIRE
+    on_38(monkeypatch)  # engine 38's trade stake: goods-1 came after and changes the log
     s = Sim(3, 20, StubMind())
     s.run(2, FIRE)
     s.finish()

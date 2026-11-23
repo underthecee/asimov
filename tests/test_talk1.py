@@ -77,7 +77,8 @@ def say(sim, to, text="Could you spare some food?", move="asks_food", price=None
 
 
 def deals(evs):
-    return [e for e in evs if e.kind == "deal"]
+    """The talk's deals. goods-1: a supply buy is a rule's deal (move "trade") between two villagers, and not one."""
+    return [e for e in evs if e.kind == "deal" and e.data["move"] != "trade"]
 
 
 def test_an_ask_said_with_the_chip_is_answered_yes_and_one_food_moves_with_a_deal():
@@ -413,7 +414,7 @@ def test_hostile_minds_and_lines_keep_every_invariant_and_replay_exactly(seed, c
             acts.append(act)
         assert check.step(acts) == [], acts  # the food added above is before the step's ledger
     said = {e.id: e for e in sim.events if e.kind == "said"}
-    for d in (e for e in sim.events if e.kind == "deal"):
+    for d in (e for e in sim.events if e.kind == "deal" and e.data["move"] != "trade"):  # goods-1: a supply buy is a rule's deal
         assert "move" in said[next(p for p in d.parents if p in said)].data
     assert deal_violations(sim.events, 0, me) == []
     assert consent == "nature" or any(e.kind == "deal" and e.data["ok"] for e in sim.events)  # not vacuous

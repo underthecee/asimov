@@ -247,9 +247,9 @@ def test_on_a_chip_line_the_voice_is_told_the_stubs_answer_and_a_fallback_says_i
         reply = next(e for e in evs if e.kind == "reply")
         _, _, facts = voice.asked[-1]
         if roll_yes:
-            assert facts["deal"] == "yes, and they hand them 1 food now" and any(e.kind == "deal" for e in evs)
+            assert facts["deal"] == "yes, and they hand them 1 food now" and any(e.kind == "deal" and e.data["move"] != "trade" for e in evs)
         else:
-            assert facts["deal"] == "no, and nothing changes hands" and not any(e.kind == "deal" for e in evs)
+            assert facts["deal"] == "no, and nothing changes hands" and not any(e.kind == "deal" and e.data["move"] != "trade" for e in evs)  # goods-1: a supply buy is a rule's deal
         want = words or ("Here, take one." if roll_yes else "I can't spare any.")
         assert reply.data["says"] == want and reply.data["answer"] == ("yes" if roll_yes else "no")
         return

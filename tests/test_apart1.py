@@ -152,7 +152,7 @@ def test_the_sentence_is_in_the_prompt_exactly_when_the_two_are_apart(seed, talk
             acts.append(act)
         assert check.step(acts) == [], acts
     assert built, "vacuous: no answer to a chip or a typed line"
-    for d in (e for e in sim.events if e.kind == "deal"):
+    for d in (e for e in sim.events if e.kind == "deal" and e.data["move"] != "trade"):  # goods-1: a supply buy is a rule's deal
         ans = sim.events[d.parents[1]]
         assert built[(ans.tick, ans.actor)], "a deal after a request built apart"
         assert d.data["ok"] or d.data["why"] != "not together" or built[(ans.tick, ans.actor)]
