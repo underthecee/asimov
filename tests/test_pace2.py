@@ -184,6 +184,8 @@ def test_the_held_typed_path_with_pace_2_on_is_pinned(monkeypatch, seed):
     from asiimov import sim as S
     monkeypatch.setattr(S, "ENGINE_VERSION", "pace-2")
     monkeypatch.setattr(R, "ENGINE_VERSION", "pace-2")
+    from test_goods import on_38
+    on_38(monkeypatch)  # the pins are engine 38's worlds: goods-1 came after and changes every log
     log, flown, sim = held_log(seed)
     assert flown > 20, "not vacuous: calls flew"
     assert any(e.kind == "mind_answer" for e in sim.events) and any(e.kind == "mind_decide" for e in sim.events)

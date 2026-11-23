@@ -251,6 +251,9 @@ TRADE_INPUT = {"farmer": "seed and feed", "crafter": "tools", "trader": "goods",
 # goods-1 (plan/goods-1-design.md, Steering R1): the good a supplying trade makes at work, a count in inv beside
 # food and coin. Only the two trades anyone needs make one; TRADE_INPUT still words it.
 TRADE_GOOD = {"farmer": "seed", "crafter": "tools"}
+# The trade stake's keys that turn goods on. A world whose trade stake has none of them runs supply-1's rule (an
+# input is a day stamp, as on engine 38), the way a world with no trade stake runs engine 22's.
+GOODS_KEYS = ("make", "hold", "start", "first", "ahead")
 # The sick-neighbor channel's answers (G3w-b, plan/v0-after-g3.md; steering 2026-11-14 05:16Z): a trait rule in
 # every world, no mind ask. As an 8B ask it collapsed onto visit (0.873, then 0.981 reworded; L31).
 NEIGHBOR_ACTIONS = ("visit", "help", "keep_away", "carry_on")
@@ -452,10 +455,11 @@ class Sim:
         if "trade" in self.state.get("stakes", {}):  # DEP-a trade-1 (research): each supplier's customer count
             self.state["trade_load"] = {}
             tr = self.state["stakes"]["trade"]
-            if not all(n in TRADE_GOOD for ns in tr["needs"].values() for n in ns) \
+            if any(k in tr for k in GOODS_KEYS) and (
+                    not all(n in TRADE_GOOD for ns in tr["needs"].values() for n in ns)
                     or not all(_is_int(tr.get(k)) and tr[k] >= lo for k, lo in
-                               (("make", 0), ("hold", 1), ("start", 0), ("first", 0), ("ahead", 1))) \
-                    or tr["start"] > tr["hold"] or tr["first"] > tr["ahead"]:
+                               (("make", 0), ("hold", 1), ("start", 0), ("first", 0), ("ahead", 1)))
+                    or tr["start"] > tr["hold"] or tr["first"] > tr["ahead"]):
                 raise ValueError(f"trade: needs name trades that make a good {tuple(TRADE_GOOD)}; make, hold, start,"
                                  " first and ahead are counts, with start within hold and first within ahead")
         if "alms" in self.state.get("stakes", {}):  # the day each villager last had alms (B5 alms-1)
@@ -478,8 +482,8 @@ class Sim:
                 "intent": None, "occasion": None, "market_seen": None, "noticed": {"day": -1, "ids": []}, "calls": {"day": -1, "n": 0},
             })
             self.state["agents"].append(a)
-            if "trade" in self.state.get("stakes", {}):  # goods-1: day 0's input in hand, and a supplier's opening stock
-                tr = self.state["stakes"]["trade"]
+            tr = self._goods()
+            if tr:  # goods-1: day 0's input in hand, and a supplier's opening stock
                 a["inv"].update({g: 0 for g in TRADE_GOOD.values()})
                 for need in self._trade_needs(a):
                     a["inv"][TRADE_GOOD[need]] += tr["first"]
@@ -1321,7 +1325,8 @@ class Sim:
                     return self._end_step(a, author, True, "met")
                 if do == "trade" and holder.get("asked") is not None:
                     return  # its buy waits on the player's answer (player-ask-1); _settle_ask ends the step
-                if do == "trade" and self._awaits_answer(b) and b["inv"][TRADE_GOOD[b["role"]]] > 0:  # goods-1: none
+                if do == "trade" and self._awaits_answer(b) and (
+                        not self._goods() or b["inv"][TRADE_GOOD[b["role"]]] > 0):  # goods-1: none
                     # to sell is no question for the player; the run fails at once (_trade)
                     rid = self._hold_ask(a, b, "trade", holder["event"])
                     if self.events[rid].kind == "ask":
@@ -1488,6 +1493,9 @@ class Sim:
                 del sk["ill"][aid]
                 sk["immune"][aid] = tick
                 self._note(int(aid), "got over the sickness")  # goods-1: it kept its unit while sick (_use_inputs)
+                if "trade" in self.state.get("stakes", {}) and not self._goods():  # supply-1: its input kept while
+                    rec = self.state["agents"][int(aid)]                             # it was sick and made no runs
+                    rec["supplied"] = {n: tick // TICKS_PER_DAY for n in self._trade_needs(rec)}
                 self._emit("recover", "rule", int(aid), {"agent": int(aid)}, [sk["src"][aid]])
         for t, who in cfg["cases"]:
             if t == tick:
@@ -1626,6 +1634,11 @@ class Sim:
     def _trade_needs(self, a: dict) -> list[str]:
         return list(self.state.get("stakes", {}).get("trade", {}).get("needs", {}).get(a["role"], []))
 
+    def _goods(self) -> dict | None:
+        """The trade stake when its inputs are goods (goods-1), else None: supply-1's day stamps (GOODS_KEYS)."""
+        tr = self.state.get("stakes", {}).get("trade")
+        return tr if tr and any(k in tr for k in GOODS_KEYS) else None
+
     def _ahead(self, a: dict, need: str) -> int:
         """goods-1: the days of an input a has from today on: the units it holds, and today's once it is in use."""
         return a["inv"][TRADE_GOOD[need]] + (1 if a.get("used", {}).get(need) == self.state["tick"] // TICKS_PER_DAY else 0)
@@ -1635,12 +1648,15 @@ class Sim:
         body is exempt: the rule sends it nowhere."""
         if self._possessed(a):
             return True
+        if not self._goods():  # supply-1: one bought today or yesterday lasts; genesis stocks day 0's
+            day = self.state["tick"] // TICKS_PER_DAY
+            return all(a.get("supplied", {}).get(n, 0) >= day - 1 for n in self._trade_needs(a))
         return all(self._ahead(a, n) >= 1 for n in self._trade_needs(a))
 
     def _use_inputs(self, a: dict):
         """goods-1: at a day's first tick of work, one unit of each input a holds is used up for the day. A sick
         villager's unit is kept (it makes no runs while sick, as under supply-1), and the player's body is exempt."""
-        if self._possessed(a) or str(a["id"]) in self.state.get("sick", {}).get("ill", {}):
+        if not self._goods() or self._possessed(a) or str(a["id"]) in self.state.get("sick", {}).get("ill", {}):
             return
         day = self.state["tick"] // TICKS_PER_DAY
         for need in self._trade_needs(a):
@@ -1653,7 +1669,7 @@ class Sim:
     def _make_good(self, a: dict):
         """goods-1: a finished unit of a supplying trade's work also makes its good, while it holds fewer than `hold`.
         It follows the work, not the yield, so a farmer makes seed in winter too."""
-        tr = self.state.get("stakes", {}).get("trade")
+        tr = self._goods()
         if not tr or a["role"] not in TRADE_GOOD:
             return
         g = TRADE_GOOD[a["role"]]
@@ -1684,8 +1700,8 @@ class Sim:
         cands = [o["id"] for o in ag if o["role"] == need and o["family"] != a["family"] and o["id"] != s]
         if not cands:
             return None
-        g = TRADE_GOOD[need]
-        pick = min(cands, key=lambda o: (0 if ag[o]["inv"][g] > 0 else 1, load.get(str(o), 0),
+        g = TRADE_GOOD[need] if self._goods() else None
+        pick = min(cands, key=lambda o: (0 if g is None or ag[o]["inv"][g] > 0 else 1, load.get(str(o), 0),
                                          self.rng.raw(f"supplier:{a['id']}:{need}", o), o))
         if s is not None:
             load[str(s)] -= 1
@@ -1707,7 +1723,8 @@ class Sim:
         day = self.state["tick"] // TICKS_PER_DAY
         tried = a.setdefault("trade_try", {})
         for need in self._trade_needs(a):
-            if tried.get(need) == day or self._ahead(a, need) >= (1 if self._in_work_block(a) else tr["ahead"]):
+            if tried.get(need) == day or (a.get("supplied", {}).get(need) == day if not self._goods() else
+                                          self._ahead(a, need) >= (1 if self._in_work_block(a) else tr["ahead"])):
                 continue
             b = self._supplier(a, need)
             if b is None or b["asleep"]:
@@ -1733,25 +1750,30 @@ class Sim:
         moves the goods and the coin together (contracts B5.6). The deal is a's act, as the run is; a's receipt
         cites it. With none in hand b sells none, and the receipt cites b's sickness while b is sick."""
         tr, need = self.state["stakes"]["trade"], b["role"]
-        price, g = tr["price"], TRADE_GOOD[b["role"]]
+        price, goods, cites = tr["price"], self._goods(), []
         if a["inv"]["coin"] < price:
             return self._receipt(a, eid, "trade", False, "no coin", extra={"to": b["id"]}, parents=parents)
-        n = min(max(1, tr["ahead"] - self._ahead(a, need)), a["inv"]["coin"] // price, b["inv"][g])
-        if n <= 0:
-            src = self.state.get("sick", {}).get("src", {}).get(str(b["id"]))
-            ill = str(b["id"]) in self.state.get("sick", {}).get("ill", {})
-            return self._receipt(a, eid, "trade", False, "none to sell", extra={"to": b["id"]},
-                                 parents=list(parents) + ([src] if ill and src is not None else []))
-        price *= n
-        a["inv"][g] += n
-        b["inv"][g] -= n
+        if goods:
+            g = TRADE_GOOD[b["role"]]
+            n = min(max(1, tr["ahead"] - self._ahead(a, need)), a["inv"]["coin"] // price, b["inv"][g])
+            if n <= 0:
+                src = self.state.get("sick", {}).get("src", {}).get(str(b["id"]))
+                ill = str(b["id"]) in self.state.get("sick", {}).get("ill", {})
+                return self._receipt(a, eid, "trade", False, "none to sell", extra={"to": b["id"]},
+                                     parents=list(parents) + ([src] if ill and src is not None else []))
+            price *= n
+            a["inv"][g] += n
+            b["inv"][g] -= n
+        else:  # supply-1: the input is a day stamp that lasts through tomorrow
+            a.setdefault("supplied", {})[need] = self.state["tick"] // TICKS_PER_DAY
         a["inv"]["coin"] -= price
         b["inv"]["coin"] += price
         a["supply_failed"][need] = 0
-        did = self._emit("deal", "rule", a["id"], {"move": "trade", "from": b["id"], "to": a["id"], g: n, "coin": price,
-                                                   "ok": True}, [eid] + [p for p in parents if p != eid])
+        if goods:
+            cites = [self._emit("deal", "rule", a["id"], {"move": "trade", "from": b["id"], "to": a["id"], g: n,
+                                                          "coin": price, "ok": True}, [eid] + [p for p in parents if p != eid])]
         rid = self._receipt(a, eid, "trade", True, "supplied", extra={"to": b["id"], "coin": price},
-                            parents=[did] + list(parents))
+                            parents=cites + list(parents))
         for x, y in ((a, b), (b, a)):
             r = self._met(x, y["id"])
             r["affinity"] = min(1000, r["affinity"] + 20)

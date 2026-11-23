@@ -77,7 +77,8 @@ def say(sim, to, text="Could you spare some food?", move="asks_food", price=None
 
 
 def deals(evs):
-    return [e for e in evs if e.kind == "deal"]
+    """The talk's deals. goods-1: a supply buy is a rule's deal (move "trade") between two villagers, and not one."""
+    return [e for e in evs if e.kind == "deal" and e.data["move"] != "trade"]
 
 
 def test_an_ask_said_with_the_chip_is_answered_yes_and_one_food_moves_with_a_deal():

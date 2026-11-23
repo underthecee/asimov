@@ -12,9 +12,15 @@ from asiimov.invariants import Checker, deal_violations, goods_totals, goods_vio
 from asiimov.minds import StubMind
 from asiimov.params import generate_population
 from asiimov.replay import replay
-from asiimov.sim import DEFAULT_STAKES, TICKS_PER_DAY, TRADE_GOOD, WORKPLACE, Sim
+from asiimov.sim import DEFAULT_STAKES, GOODS_KEYS, TICKS_PER_DAY, TRADE_GOOD, WORKPLACE, Sim
 
 TR = DEFAULT_STAKES["trade"]
+
+
+def on_38(monkeypatch):
+    """Engine 38's trade stake for the rest of a test: none of the goods keys, so inputs are supply-1's day stamps.
+    The older engines' pinned logs (tests/test_text1.py, test_think1.py, test_pace2.py) are worlds on it."""
+    monkeypatch.setitem(DEFAULT_STAKES, "trade", {k: v for k, v in TR.items() if k not in GOODS_KEYS})
 
 
 def _world(days, seed=3, n=100):
@@ -238,3 +244,32 @@ def test_trade_stakes_that_cannot_hold_are_refused(bad):
         del stakes["trade"]["hold"]
     with pytest.raises(ValueError, match="trade:"):
         Sim(1, 20, StubMind(), genesis={**generate_population(1, 20), "stakes": stakes})
+
+
+def test_a_world_on_engine_38s_trade_stake_writes_engine_38s_log_and_holds_no_goods(monkeypatch):
+    """The goods rules are the trade stake's goods keys. Without them the world is supply-1's, byte for byte: the
+    golden log of engine 38 but for the engine field, with no good held, made, used or dealt."""
+    import hashlib
+    import asiimov.sim as S
+    from test_world import FIRE, GOLDEN, run
+    on_38(monkeypatch)
+    monkeypatch.setattr(S, "ENGINE_VERSION", "38")
+    s = run(StubMind(), agents=20, days=2, seed=3, player=FIRE)
+    assert hashlib.sha256("".join(e.to_json() + "\n" for e in s.events).encode()).hexdigest() == GOLDEN["38"]
+    assert any(e.kind == "receipt" and e.data["action"] == "trade" and e.data["ok"] for e in s.events)  # not vacuous
+    sim = Sim(3, 100, StubMind())
+    check, bad = Checker(sim), []
+    for _ in range(3 * TICKS_PER_DAY):
+        bad += check.step()
+    assert bad == [] and not any(g in a["inv"] for a in sim.state["agents"] for g in TRADE_GOOD.values())
+    assert not [e for e in sim.events if e.kind in ("made", "used") or (e.kind == "deal" and e.data["move"] == "trade")]
+    sim.state["agents"][0]["inv"]["seed"] = 1  # and a good that turns up in such a world is caught
+    assert any("without goods" in v for v in goods_violations(sim))
+    sim.finish()
+
+
+def test_some_of_the_goods_keys_without_the_rest_is_refused():
+    for k in GOODS_KEYS:
+        tr = {x: v for x, v in TR.items() if x not in GOODS_KEYS or x == k}
+        with pytest.raises(ValueError, match="trade:"):
+            Sim(1, 20, StubMind(), genesis={**generate_population(1, 20), "stakes": {**DEFAULT_STAKES, "trade": tr}})

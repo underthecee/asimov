@@ -198,6 +198,8 @@ def test_a_world_without_the_flag_is_byte_identical_to_before_think_1(monkeypatc
     # pace-2 moves when a held world's plans land, which these pins predate; this test is about the think flag, so it
     # runs with pace-2 off (the pins then still hold byte for byte). tests/test_pace2.py covers pace-2 itself.
     monkeypatch.setattr(S.Sim, "_pace2", lambda self: False)
+    from test_goods import on_38
+    on_38(monkeypatch)  # likewise goods-1: the pins are worlds on supply-1's trade stake
     talk = PRIVATE if name == "typed" else {"consent": "private"}
     log, decided = day_log(talk, seed)
     assert decided >= 2, "vacuous: no private decision in the day"

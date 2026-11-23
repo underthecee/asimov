@@ -5,7 +5,7 @@ unattended run (asiimov/soak.py, which counts them and keeps going). Each check 
 violation strings instead of raising, so a long run can report every one it hits.
 """
 from .events import ORIGINS, Event
-from .sim import PERSON_STEPS, RULE_STEPS, STEP_DOS, TRADE_GOOD, Sim
+from .sim import GOODS_KEYS, PERSON_STEPS, RULE_STEPS, STEP_DOS, TRADE_GOOD, Sim
 from .worldmap import travel_ticks
 
 BOOL_FIELDS = ("asleep", "has_food", "kin", "talk")  # talk: an answer's own hold (say-3)
@@ -134,11 +134,14 @@ def trade_deal_violations(events: list[Event], e: Event) -> list[str]:
     the seller, moves at least one unit of the one good the seller's trade makes, for the price a unit in coin, and
     the buyer's receipt for the run follows at once and cites it."""
     d, pop = e.data, events[0].data["population"]
+    tr = pop.get("stakes", {}).get("trade", {})
+    if not any(k in tr for k in GOODS_KEYS):
+        return [f"event {e.id}: trade deal in a world without goods"]
     due = events[e.parents[0]] if e.parents else None
     good = TRADE_GOOD.get(pop["agents"][d["from"]]["role"]) if type(d.get("from")) is int else None
     n = d.get(good) if good else None
     ok = (d.get("ok") is True and e.actor == d.get("to") and d["from"] != d["to"] and good is not None
-          and type(n) is int and n >= 1 and d.get("coin") == n * pop["stakes"]["trade"]["price"]
+          and type(n) is int and n >= 1 and d.get("coin") == n * tr["price"]
           and set(d) == {"move", "from", "to", good, "coin", "ok"}
           and due is not None and due.kind == "trade_due" and due.actor == d["to"] and due.data["to"] == d["from"])
     r = events[e.id + 1] if e.id + 1 < len(events) else None
@@ -151,9 +154,10 @@ def trade_deal_violations(events: list[Event], e: Event) -> list[str]:
 def goods_violations(sim: Sim) -> list[str]:
     """goods-1: a villager holds no more of its own good than `hold`, no more of an input than `ahead` days' worth,
     and none of a good it neither makes nor needs."""
-    tr = sim.state.get("stakes", {}).get("trade")
-    if not tr:
-        return []
+    tr = sim._goods()
+    if not tr:  # a world on supply-1's stamps, or with no trade: nobody holds a good at all
+        return [f"agent {a['id']} holds {g} in a world without goods"
+                for a in sim.state["agents"] for g in TRADE_GOOD.values() if g in a["inv"]]
     out = []
     for a in sim.state["agents"]:
         needs = {TRADE_GOOD[n] for n in tr["needs"].get(a["role"], [])}

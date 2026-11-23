@@ -408,7 +408,7 @@ def test_the_deal_invariant_catches_a_give_without_the_decision():
     sim, me, to, ag = ready(mind)
     typed(sim, to)
     events = [e for e in sim.events]
-    d = next(e for e in events if e.kind == "deal")
+    d = deals(events)[0]
     dec = next(e for e in events if e.kind == "mind_decide")
     assert deal_violations(events, 0, me) == []
     import copy
@@ -650,6 +650,8 @@ def test_a_world_where_nobody_speaks_is_engine_35s_log_but_for_the_engine_field(
     import hashlib
     from test_world import FIRE, GOLDEN, run
     monkeypatch.setattr(S, "ENGINE_VERSION", "35")
+    from test_goods import on_38
+    on_38(monkeypatch)  # engine 35's trade stake: goods-1 came after and changes every log
     s = run(StubMind(), agents=20, days=2, seed=3, player=FIRE)
     assert hashlib.sha256("".join(e.to_json() + "\n" for e in s.events).encode()).hexdigest() == GOLDEN["35"]
 
@@ -726,6 +728,8 @@ def test_a_spoken_world_without_the_flags_writes_engine_36s_log(monkeypatch, con
     import hashlib
     import test_talk1
     monkeypatch.setattr(S, "ENGINE_VERSION", "36")
+    from test_goods import on_38
+    on_38(monkeypatch)  # engine 36's trade stake: goods-1 came after and changes every log
     limit = S.Sim._talk_limit
 
     def as_36(self, t, sp, action, price):  # engine 36 offers a yes to two who have parted, and the settle refuses it
