@@ -108,6 +108,10 @@ def agent_cmd(key: str, model: str) -> str:
 
 
 def up(args):
+    clash = set(args.port) & set(getattr(args, "tcp_port", []))
+    if clash:  # L42 (aipt4, 2026-11-22): 8765/http with 8765/tcp left neither route reachable for 10 minutes
+        sys.exit(f"port {sorted(clash)} is exposed as both http and tcp; give the tcp fallback its own port "
+                 "(e.g. --tcp-port 8766, with scripts/tcp_relay.py 8766 8765 on the pod)")
     key = secrets.token_urlsafe(24)
     expires = int(time.time() + args.ttl_hours * 3600)
     serve = (f"exec vllm serve {args.model} --host 0.0.0.0 --port 8000 --api-key {key} "
@@ -176,10 +180,14 @@ def wait(args):
 
 def ports(args):
     """The pod's direct TCP mappings, the fallback when the HTTP proxy fails (Steering 2026-11-20 23:21Z): a port
-    exposed with `up --tcp-port P` is reached at ws://PUBLIC_IP:MAPPED/ with no proxy and no TLS."""
+    exposed with `up --tcp-port P` is reached at ws://IP:PUBLIC/ with no proxy and no TLS. REST v2 lists them under
+    runtime.ports as {ip, private, public, type} once the pod runs (seen 2026-11-22)."""
     pod = call("GET", f"/pods/{args.pod}") or {}
-    keys = [k for k in pod if any(w in k.lower() for w in ("ip", "port"))]
-    print(json.dumps({k: pod[k] for k in keys}, indent=2))
+    maps = [m for m in ((pod.get("runtime") or {}).get("ports") or []) if m.get("type") == "tcp"]
+    for m in maps:
+        print(f"{m.get('private')}/tcp -> ws://{m.get('ip')}:{m.get('public')}/")
+    if not maps:
+        print("no tcp mapping yet (exposed: %s)" % ", ".join(pod.get("ports") or []))
 
 
 def pod_alive(pid: str) -> bool:
