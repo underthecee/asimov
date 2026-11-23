@@ -4,6 +4,8 @@
 #   activity  {activity, place, arrive[, from]}  a walk when arrive > tick (from: where it starts; absent when
 #             the villager keeps its current walk), else already there
 #   arrive    {place}                            the walk ends
+#   halt      {pos, place, depart, arrive}       reach-1: a walker the player called or spoke to stands on `pos`
+#             until tick `depart`, then walks on to `place`
 #   moved     {from, pos, place}                 walk-1: the player walked its body to tile `pos`; `place` is the
 #             place holding that tile, or null in the open. It stands on that tile until a walk sets out
 # wake and sleep only change the activity. Position math is worldmap.position, in integer tiles, so at a
@@ -62,6 +64,10 @@ func add_event(e: Dictionary) -> void:
 			else:  # already there: a walked body keeps its tile within the place
 				var m = _last(aid)
 				_put(aid, t, d["place"], null, d["activity"], m[4] if m[1] == d["place"] else null)
+		"halt":  # reach-1: a walker stopped on its way: the same walk from the tile it stands on, leaving at `depart`
+			var aid := int(e["actor"])
+			_put(aid, t, null, {"from": [int(d["pos"][0]), int(d["pos"][1])], "to": d["place"],
+					"depart": int(d["depart"]), "arrive": int(d["arrive"])}, _last(aid)[3])
 		"arrive":
 			var aid := int(e["actor"])
 			_put(aid, t, d["place"], null, _last(aid)[3])
@@ -201,11 +207,12 @@ func slot(place: String, aid: int) -> Vector2i:
 
 func pos_at(aid: int, t: float) -> Vector2:
 	## Sim.pos (space-1, B1.1): where the body is at sim-time `t`, from the state at the view tick floor(t). The
-	## tile the player walked it to, its slot at a place, or its route at `t`, between tiles when `t` is.
+	## tile the player walked it to, its slot at a place, or its route at `t` - 1, between tiles when `t` is: a
+	## body is seen one tick behind its route, so a walk shows from its start (reach-1, as Sim.pos says).
 	var s := state_at(aid, int(floor(t)))
 	if s[2] == null:
 		return Vector2(int(s[4][0]), int(s[4][1])) if s[4] != null else Vector2(slot(s[1], aid))
-	return route_pos(s[2], anchor(s[2]["to"]), walk, t)
+	return route_pos(s[2], anchor(s[2]["to"]), walk, t - 1.0)
 
 
 static func route_pos(r: Dictionary, to: Vector2i, walk_tiles: int, t: float) -> Vector2:

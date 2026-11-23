@@ -141,7 +141,7 @@ def test_an_offered_act_gets_the_receipts_a_minds_identical_deliberation_gets():
     made to deliberate at T and gives the same answer. Same receipts, rolls and all. The act joins the tick
     at its fixed point (`late`), which is where a mind's answer applies; since time-1b an act that arrives
     between ticks lands at its own time instead, by the same rules on who is there then (tests/test_time.py)."""
-    rng, compared, rolls = random.Random(3), 0, 0
+    rng, compared, rolls, in_reach = random.Random(3), 0, 0, 0
     for trial in range(150):
         seed, aid = rng.randrange(50), rng.randrange(14)
         T = rng.randrange(TICKS_PER_DAY // 2, TICKS_PER_DAY + 60)
@@ -156,18 +156,26 @@ def test_an_offered_act_gets_the_receipts_a_minds_identical_deliberation_gets():
             target = rng.randrange(14) if action in PERSON_STEPS else None
         out = {"action": action, "target": target} if target is not None else {"action": action}
         twins = []
-        joined = []
+        joined, passing = [], []
+
+        def join(s, done):
+            # reach-1: the player can name someone a tile away across open ground; a mind's view stays its place's
+            b = s.state["agents"][aid]
+            passing.append(any((b["place"] is None or o["place"] is None) and s._near(b, o)
+                               for o in s.state["agents"] if o["id"] != aid))
+            joined.append(s.late_act({"kind": "act", **out}))
         for mind, acts in ((StubMind(), [{"kind": "possess", "agent": aid}]), (Forced(aid, T, out), [])):
             w = Sim(seed, 14, mind)
             w.run_until(T)
             a = w.state["agents"][aid]  # the same occasion and no cooldown in both, so both may act now
             a["cooldown_until"], a["occasion"] = 0, {"why": "hungry", "who": None, "event": None, "tick": T, "salience": 900}
             a["inv"]["food"] = max(1, a["inv"]["food"])  # so the mind's occasion is this one, not its hunger
-            w.step(acts, during=(lambda s, done: joined.append(s.late_act({"kind": "act", **out}))) if acts else None)
+            w.step(acts, during=join if acts else None)
             twins.append(w)
         A, B = twins
-        if joined == [None]:  # its own mind was being asked this tick (a plan on waking): the act waits a tick
-            continue
+        in_reach += passing == [True]
+        if joined == [None] or passing == [True]:  # its own mind was being asked this tick (a plan on waking): the
+            continue                               # act waits a tick; or someone passing is in the player's reach
         if any(e.kind in ("sleep", "wake") and e.actor == aid and e.tick == T for e in A.events) or \
                 A.state["agents"][aid]["asleep"]:
             continue
@@ -185,6 +193,9 @@ def test_an_offered_act_gets_the_receipts_a_minds_identical_deliberation_gets():
         compared += 1
         rolls += any("roll" in r for r in ra)
     assert compared >= 30 and rolls >= 5, (compared, rolls)
+    # Steering 2026-11-23 21:31Z: the trials left out for a passer in the body's reach are counted and stay a
+    # minority of those compared, so the skip can't empty the test
+    assert in_reach * 2 < compared, (in_reach, compared)
 
 
 # ---------------------------------------------------------------------- through the live runner

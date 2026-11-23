@@ -30,7 +30,7 @@ from .memory import (REFLECT_ASK, assemble_decide, assemble_prompt, is_bare_valu
 from .minds import MindRequest, ReplayDivergence, dispatch
 from .params import generate_population
 from .rng import Rng
-from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, travel_ticks
+from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, tile_at, travel_ticks
 
 TICKS_PER_DAY = 144
 SUB = 600  # time-1a (B2.1): an act's time inside its tick, f, counts 600ths of a tick, which are sim-seconds
@@ -282,13 +282,14 @@ ACTION_CLAUSES = {
 assert set(ACTION_CLAUSES) == set(DELIBERATE_ACTIONS)
 GO_ACTS = ("go_to",)  # the player walks its body to a named place and stays a while (go-to-1); never a mind's
 WALK_ACTS = ("walk",)  # the player steps its body to a tile, at most WALK tiles a tick (walk-1); never a mind's
-PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS + WALK_ACTS  # what a player's act may name
+HAIL_ACTS = ("hail",)  # the player calls to a villager walking by within sight, who stops (reach-1); never a mind's
+PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS + WALK_ACTS + HAIL_ACTS  # what a player's act may name
 
 
 def act_cost(action: str) -> int:
     """How long a player's act holds the body, in SUBths of a tick (time-1b, B2.3): COST for every act until
     verbs-1's table, and nothing for words, an answer to an ask, or a walk (which walking speed bounds)."""
-    return 0 if action in SAY_ACTS + ANSWER_ACTS + WALK_ACTS else COST
+    return 0 if action in SAY_ACTS + ANSWER_ACTS + WALK_ACTS + HAIL_ACTS else COST
 
 
 def action_clauses(price: int) -> dict:
@@ -316,7 +317,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "42"  # 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "reach-1"  # reach-1: the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -794,11 +795,19 @@ class Sim:
     def _hour(self):
         return (self.state["tick"] % TICKS_PER_DAY) * 10 // 60
 
-    def _view(self, a: dict, occupancy: dict) -> dict:
+    def _view(self, a: dict, occupancy: dict, reach: bool = False) -> dict:
+        """What the agent has in front of it. `reach` (reach-1) is for the player's own acts and view: the
+        people present are those in reach of its body (`_near`), which adds a walker within a tile, or
+        someone a tile away when the body stands in the open; at a place with nobody passing it is the same
+        list. A mind's view stays the place's, so no log of a world with no player changes."""
         agents = self.state["agents"]
         fam = self.state["families"][a["family"]]["members"]
+        here = occupancy.get(a["place"], [])  # the tick's perception (L2), for a mind and for the player alike
+        if reach:  # plus whoever is within a tile across open ground, now
+            here = sorted(set(here) | {o["id"] for o in agents
+                                       if (a["place"] is None or o["place"] is None) and self._near(a, o)})
         present = [{"id": o, "role": agents[o]["role"], "has_food": agents[o]["inv"]["food"] > 0,
-                    "kin": o in fam} for o in occupancy.get(a["place"], []) if o != a["id"]]
+                    "kin": o in fam} for o in here if o != a["id"]]
         kin = [{"id": o, "has_food": agents[o]["inv"]["food"] > 1} for o in fam if o != a["id"]]
         at_market = a["place"] == "market"
         view = {"role": a["role"], "traits": a["traits"], "hour": self._hour(), "coin": a["inv"]["coin"],
@@ -1100,11 +1109,17 @@ class Sim:
         """Where the body is at sim-time `t`, in ticks (space-1, B1.1): a pure function of the state, with `t`
         at or after the state's tick and whole or a Fraction; the state's tick when left out. Derived, never
         stored, but for a body the player walked (a["at"]). A villager at a place stands on its slot there,
-        keyed by its id; a walker is where its route puts it at `t`, between tiles when `t` is. Routes still
-        run anchor to anchor (`_pos`), so no log of a world with no player changes."""
+        keyed by its id; a walker is where its route puts it at `t` - 1, between tiles when `t` is. Routes still
+        run anchor to anchor (`_pos`), so no log of a world with no player changes.
+
+        Why t - 1 (reach-1, Steering 2026-11-23 20:39Z): step T decides a walk that leaves at T, and the state
+        it leaves is tick T + 1's, so the time between that step and the next is what shows the walk's first
+        tick. A body is where the last step revealed it to be going, one tick behind its route: every walk is
+        seen from its start, and the walker reaches its destination as the step that arrives it runs. It is
+        derived only; the route, its arrival and the log are untouched."""
         if a["route"]:
             return position(a["route"], self.map["places"][a["route"]["to"]]["anchor"],
-                            self.state["tick"] if t is None else t)
+                            (self.state["tick"] if t is None else t) - 1)
         if "at" in a:
             return list(a["at"])
         if a["place"] not in self._own_tiles:
@@ -1133,6 +1148,82 @@ class Sim:
         """Both have arrived at one place. Two walkers are never together. Every person action, talk and
         notice reads presence through here or through the tick's occupancy, which holds arrivals only."""
         return a["place"] is not None and a["place"] == b["place"]
+
+    def _tile_now(self, a: dict) -> list[int]:
+        """The tile the body stands on at the sim-time being resolved (B2.4: reach and sight are judged at
+        the act's own t): the tick plus the time inside it of the last player act recorded for it, the whole
+        tick with none. In whole numbers, and equal to tile(a, that time)."""
+        tick = self.state["tick"]
+        return self.tile_n(a, tick * SUB + (self._f if self._window == tick else 0))
+
+    def tile_n(self, a: dict, n: int) -> list[int]:
+        """tile(a, n / SUB) for a time given in SUBths of a tick, in whole numbers: a walker one tick behind
+        its route (pos()), anyone else where it stands."""
+        r = a["route"]
+        return tile_at(r, self.map["places"][r["to"]]["anchor"], n - SUB, SUB) if r else self.tile(a)
+
+    def can_hail(self, a: dict, b: dict, n: int) -> str | None:
+        """Why `a` can't hail `b` at time n (in SUBths), or None: it must be walking, still on its way, and
+        in sight then."""
+        if not (a["place"] == b["place"] if a["place"] is not None and b["place"] is not None
+                else near(self.tile_n(a, n), self.tile_n(b, n), SEE)):
+            return "target not in sight"
+        if b["route"] is None or self.tile_n(b, n) == list(self.map["places"][b["route"]["to"]]["anchor"]):
+            return "not walking"  # at a place, or as good as there
+        return None
+
+    def _within(self, a: dict, b: dict, tiles: int) -> bool:
+        """reach() and sees() at the sim-time being resolved: one place, or one of them in the open and
+        their tiles at most `tiles` apart."""
+        if a["place"] is not None and b["place"] is not None:
+            return a["place"] == b["place"]
+        return near(self._tile_now(a), self._tile_now(b), tiles)
+
+    def _near(self, a: dict, b: dict) -> bool:
+        """reach-1 (B1.3): whether a person act, a line or a handover between the two can happen. With the
+        player's body on either side it is reach at the act's own time: one place, or one of them in the open
+        and their tiles at most REACH apart, so a walker can be reached on its way. Between two villagers it
+        is `_together`, as ever, so a world with no player is untouched."""
+        held = self.state.get("player", {}).get("agent")
+        if held is None or held not in (a["id"], b["id"]):
+            return self._together(a, b)
+        return self._within(a, b, REACH)
+
+    def _halted(self, a: dict) -> bool:
+        """Standing on its way because the player stopped it (a `halt` re-based its route) and not yet off again."""
+        r = a["route"]
+        return r is not None and r["depart"] >= self.state["tick"] and r["event"] is not None \
+            and self.events[r["event"]].kind == "halt"
+
+    def _halt(self, a: dict, ticks: int, parents) -> int | None:
+        """reach-1: a walker the player hailed or spoke to stops where it is for `ticks` ticks (or stays
+        stopped that long from now), then walks on to where it was going. Its route is re-based: from the
+        tile it stands on at this moment, leaving when the hold ends (a tick earlier on the route's own clock,
+        which a body is seen one tick behind: pos()), so nothing new is stored and it stands there until then. The `halt` event tells a reader of the log where it stands
+        and when it leaves and arrives. Nothing happens to one that isn't walking."""
+        r = a["route"]
+        if r is None:
+            return None
+        tick = self.state["tick"]
+        frm = self._tile_now(a)
+        depart = max(tick + ticks - 1, r["depart"])
+        if (frm, depart) == (list(r["from"]), r["depart"]):
+            return r["event"]  # it already stands here until then: nothing to tell
+        r["from"], r["depart"] = frm, depart
+        r["arrive"] = depart + travel_ticks(frm, self.map["places"][r["to"]]["anchor"])
+        r["event"] = self._emit("halt", "rule", a["id"], {"pos": frm, "place": r["to"], "depart": depart,
+                                                         "arrive": r["arrive"]}, list(parents))
+        return r["event"]
+
+    def _walk_on(self, a: dict, parents):
+        """reach-1: a halted walker sets off again now (its answer was to leave, or the player let the body
+        go): the same walk from where it stands, as an `activity` event with its `from`, as any walk starts."""
+        r, tick = a["route"], self.state["tick"]
+        if r is None or r["depart"] <= tick:
+            return
+        r["depart"], r["arrive"] = tick, tick + travel_ticks(r["from"], self.map["places"][r["to"]]["anchor"])
+        r["event"] = self._emit("activity", "rule", a["id"], {"activity": a["activity"], "place": r["to"],
+                                                             "arrive": r["arrive"], "from": r["from"]}, list(parents))
 
     def _set_activity(self, a: dict, activity: str, place: str, parents):
         """Start `activity` at `place`: there at once if the agent is already there or headed there, else a
@@ -1298,7 +1389,10 @@ class Sim:
         if do in INSTANT_STEPS:  # acts where the agent already is, or is headed
             return a["activity"], self._dest(a)
         if do in REACH_STEPS:  # where the target is, or is walking to
-            dest = self._dest(self.state["agents"][t])
+            b = self.state["agents"][t]
+            if not self._together(a, b) and self._near(a, b):
+                return a["activity"], self._dest(a)  # reach-1: the player's body is within reach of it already
+            dest = self._dest(b)
             # walk-1: a body the player has walked into the open is at no place: whoever seeks it waits where they are
             return ("visit", dest) if dest is not None else (a["activity"], self._dest(a))
         if do == "avoid":
@@ -1363,7 +1457,7 @@ class Sim:
             return self._end_step(a, author, self.events[rid].data["ok"], self.events[rid].data["why"])
         if do in REACH_STEPS:
             b = self.state["agents"][t]
-            if self._together(a, b) and not b["asleep"]:
+            if self._near(a, b) and not b["asleep"]:
                 if do == "seek":
                     self._meet(a, b, holder["event"])
                     return self._end_step(a, author, True, "met")
@@ -2193,7 +2287,7 @@ class Sim:
             return self._ask_share(a, t, action, eid)
         if action == "steal":
             # Live places, not the tick-start occupancy: the target may already have moved this tick.
-            if not self._together(a, t):
+            if not self._near(a, t):
                 return self._receipt(a, eid, action, False, "target not here")
             if t["inv"]["food"] <= 0:
                 return self._receipt(a, eid, action, False, "target has no food")
@@ -2201,7 +2295,7 @@ class Sim:
         fam = self.state["families"][a["family"]]["members"]
         if target not in fam:
             return self._receipt(a, eid, action, False, "not kin")
-        if not self._together(a, t):  # the map's place check (plan/t6-map-spec.md section 5)
+        if not self._near(a, t):  # the map's place check (plan/t6-map-spec.md section 5)
             return self._receipt(a, eid, action, False, "target not here", extra={"to": t["id"]})
         if t["asleep"]:
             return self._receipt(a, eid, action, False, "target asleep", extra={"to": t["id"]})
@@ -2255,7 +2349,7 @@ class Sim:
         """ask_food or buy_from: ask a person here, kin or not, for 1 food (buy_from pays the food price in coin
         for it). Code decides with a seeded draw logged on the receipt; a refusal is the "refused" occasion."""
         to = {"to": t["id"]}
-        if not self._together(a, t):  # live places (L2)
+        if not self._near(a, t):  # live places (L2)
             return self._receipt(a, eid, action, False, "target not here", extra=to)
         if t["asleep"]:
             return self._receipt(a, eid, action, False, "target asleep", extra=to)
@@ -2337,7 +2431,7 @@ class Sim:
         rec = self._talk_record(t, sp["id"])
         kin = sp["id"] in self.state["families"][t["family"]]["members"]
         affinity = t["relationships"].get(str(sp["id"]), {}).get("affinity", 0)
-        if not self._together(t, sp):  # apart-1: nothing can change hands between two who aren't at one place
+        if not self._near(t, sp):  # apart-1: nothing can change hands between two who aren't at one place
             return "apart"
         if t["inv"]["food"] < p["min_food"]:
             return "food"
@@ -2487,7 +2581,7 @@ class Sim:
         data = {"move": move, "from": t["id"], "to": sp["id"], "food": 1, **({"coin": price} if price is not None else {}),
                 **({"typed": 1} if typed else {})}
         why = None
-        if not self._together(t, sp):
+        if not self._near(t, sp):
             why = "not together"
         elif t["asleep"]:
             why = "asleep"
@@ -2667,15 +2761,15 @@ class Sim:
         # aren't an answer, so a spoken "no" can't be overridden by the roll; the ask waits for agree or decline,
         # another act, or its hour.
         # talk-1 (design §2.4): an active player who moves on has declined, so its nature no longer gives for it.
-        for q in (list(self.state["player"].get("asks", [])) if action not in SAY_ACTS else []):
+        for q in (list(self.state["player"].get("asks", [])) if action not in SAY_ACTS + HAIL_ACTS else []):
             self._settle_ask(q, 0, [eid])
-        if action in GO_ACTS or action in SAY_ACTS:  # no offer, cooldown or people: checked when applied
+        if action in GO_ACTS + SAY_ACTS + HAIL_ACTS:  # no offer, cooldown or people: checked when applied
             self.player_pending[a["id"]] = (eid, action, target, [], [])
             return
         if action in RATED_ACTS and self.state["tick"] < a["cooldown_until"]:
             self._receipt(a, eid, action, False, "cooldown")
             return
-        view = self._view(a, occupancy)
+        view = self._view(a, occupancy, reach=True)
         if a["occasion"]:  # what a deliberation's situation would say; shown to the player as the occasion
             view["occasion"] = {k: a["occasion"].get(k) for k in ("why", "who", "detail")}
         view["offer"] = self._offer(a, view)
@@ -2693,12 +2787,46 @@ class Sim:
             return self._go_to(a, eid, target)
         if action in SAY_ACTS:
             return self._say(a, eid, target)
+        if action in HAIL_ACTS:
+            return self._hail(a, eid, target)
         if action not in offer:
             self._receipt(a, eid, action, False, "not offered", extra={"offer": offer})
         elif action in PERSON_STEPS and target not in people:
             self._receipt(a, eid, action, False, "unknown target")
         else:
             self._resolve(a, {"action": action, "target": target if action in PERSON_STEPS else None}, eid)
+            if action in INSTANT_STEPS + GIFTS:
+                self._keep(a, self.state["agents"][target], eid)
+
+    def _keep(self, a: dict, b: dict, eid: int):
+        """reach-1 (Steering 2026-11-23 20:24Z): an act of the player's on a walker it stopped, from within
+        reach, keeps that walker standing for LISTEN_TICKS from now, as a line does. Nothing for anyone else."""
+        if not self._halted(b) or not self._within(a, b, REACH):
+            return
+        self._halt(b, LISTEN_TICKS, [eid])
+        ov = b["override"]
+        if ov is not None and ov.get("talk") and ov["do"] == "stay":
+            ov["left"] = max(ov["left"], LISTEN_TICKS)
+
+    def _hail(self, a: dict, eid: int, target):
+        """reach-1 (Steering 2026-11-23 20:24Z): the player calls to a villager walking by within sight, and
+        it stops where it is for LISTEN_TICKS, so a line, an ask or a gift can reach it. No words and no mind
+        call. Only a walker still on its way stops. Hailing one that already stands doesn't lengthen its wait
+        (only a line or an act on it does), so nobody is held in place by hailing."""
+        agents = self.state["agents"]
+        if not (_is_int(target) and 0 <= target < len(agents)) or target == a["id"]:
+            return self._receipt(a, eid, "hail", False, "unknown target")
+        b, to, tick = agents[target], {"to": target}, self.state["tick"]
+        why = self.can_hail(a, b, tick * SUB + (self._f if self._window == tick else 0))
+        if why:
+            return self._receipt(a, eid, "hail", False, why, extra=to)
+        if self._halted(b):
+            return self._receipt(a, eid, "hail", True, "already stopped", extra=to)
+        hid = self._halt(b, LISTEN_TICKS, [eid])
+        if b["override"] is None:  # as a line's listening hold: its day doesn't walk it elsewhere meanwhile
+            b["override"] = {"do": "stay", "target": None, "place": self._dest(b), "event": hid, "left": LISTEN_TICKS,
+                             "talk": True}
+        return self._receipt(a, eid, "hail", True, "hailed", extra=to, parents=[hid])
 
     def _say(self, a: dict, eid: int, target):
         """The player's line to a villager here and awake (say-1): a `said` event the listener remembers, and
@@ -2707,7 +2835,7 @@ class Sim:
         if not (0 <= target < len(agents)) or target == a["id"]:
             return self._receipt(a, eid, "say", False, "unknown target")
         t = agents[target]
-        if t["place"] is None or t["place"] != a["place"]:
+        if not self._near(a, t):  # reach-1: at one place, or within a tile of each other out in the open
             return self._receipt(a, eid, "say", False, "target not here", extra={"to": target})
         if t["asleep"]:
             return self._receipt(a, eid, "say", False, "target asleep", extra={"to": target})
@@ -2739,10 +2867,11 @@ class Sim:
         # that. Only when no other override runs: a sick day home or a trade keeps going; an answer's leave walks.
         ov = t["override"]
         if ov is None:
-            t["override"] = {"do": "stay", "target": None, "place": t["place"], "event": sid, "left": LISTEN_TICKS,
+            t["override"] = {"do": "stay", "target": None, "place": self._dest(t), "event": sid, "left": LISTEN_TICKS,
                              "talk": True}
         elif ov.get("talk") and ov["do"] == "stay":
             ov["left"] = max(ov["left"], LISTEN_TICKS)
+        self._halt(t, LISTEN_TICKS, [sid])  # reach-1: a walker spoken to on its way stops to listen, as long
         t["occasion"] = {"why": "spoken", "salience": t["cognition"]["deliberation_threshold"], "who": a["id"],
                          "event": sid, "detail": quoted, "tick": self.state["tick"]}
         if move is not None:  # talk-1: a later line without a chip replaces it, and asks nothing
@@ -2786,8 +2915,11 @@ class Sim:
         if nxt == "stay":
             a["override"] = {"do": "stay", "target": None, "place": self._dest(a), "event": eid, "left": OCCASION_TICKS,
                              "talk": True}
+            if self._halted(a):  # reach-1: a walker that was stopped and stays keeps standing where it stopped;
+                self._halt(a, OCCASION_TICKS, [eid])  # one already on its way again walks on, as it always did
         elif nxt == "leave" and isinstance(occ.get("who"), int):
             a["override"] = {"do": "avoid", "target": occ["who"], "event": eid, "left": OCCASION_TICKS, "talk": True}
+            self._walk_on(a, [eid])  # reach-1: a walker that leaves sets off again at once
 
     def _reply(self, a: dict, occ: dict, eid: int, out: dict | None, answer: str | None = None,
                gives: str | None = None):
@@ -2898,6 +3030,8 @@ class Sim:
             if (action in GO_ACTS) != (place is not None) or action in GO_ACTS and \
                     (target is not None or not isinstance(place, str) or place not in self.map["places"]):
                 raise ValueError(f"act: go_to takes a place on the map and only go_to does ({action!r}, {place!r})")
+            if action in HAIL_ACTS and not _is_int(target):
+                raise ValueError(f"act: hail takes a target ({target!r})")
             to = act.get("to")
             if (action in WALK_ACTS) != (to is not None) or action in WALK_ACTS and not (
                     target is None and on_map(self.map, to)):
@@ -3016,7 +3150,7 @@ class Sim:
             del p["asks"]
         x, t, action = self.state["agents"][q["asker"]], self.state["agents"][p["agent"]], q["action"]
         cite, to = [q["event"]] + list(parents), {"to": t["id"]}
-        if not self._together(x, t):
+        if not self._near(x, t):
             rid = self._receipt(x, q["src"], action, False, "target not here", extra=to, parents=cite)
         elif t["asleep"]:
             rid = self._receipt(x, q["src"], action, False, "target asleep", extra=to, parents=cite)
@@ -3046,7 +3180,7 @@ class Sim:
         q = next((q for q in self.state["player"].get("asks", []) if q["asker"] == target), None)
         if q is None:
             return self._receipt(a, eid, action, False, "no ask")
-        if not self._together(a, self.state["agents"][target]):  # aipt1 t66/t120 (Steering 11:49Z): one of them has
+        if not self._near(a, self.state["agents"][target]):  # aipt1 t66/t120 (Steering 11:49Z): one of them has
             rid = self._receipt(a, eid, action, False, "not together", extra={"to": target})  # gone; nothing was said
         else:
             rid = self._receipt(a, eid, action, True, "said yes" if action == "agree" else "said no",

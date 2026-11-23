@@ -5,8 +5,8 @@ unattended run (asiimov/soak.py, which counts them and keeps going). Each check 
 violation strings instead of raising, so a long run can report every one it hits.
 """
 from .events import ORIGINS, Event
-from .sim import PERSON_STEPS, RULE_STEPS, STEP_DOS, Sim
-from .worldmap import on_map, place_at, travel_ticks
+from .sim import PERSON_STEPS, RULE_STEPS, STEP_DOS, SUB, Sim
+from .worldmap import REACH, SEE, near, on_map, own_tiles, place_at, slot, tile_at, travel_ticks
 
 BOOL_FIELDS = ("asleep", "has_food", "kin", "talk")  # talk: an answer's own hold (say-3)
 
@@ -57,23 +57,92 @@ def map_violations(sim: Sim, a: dict, longest: int) -> list[str]:
 TOGETHER = {"talk": "with", "meet": "with", "snub": "with"}
 
 
-def presence_violations(events: list[Event], start: int, where: dict) -> list[str]:
+class Bodies:
+    """reach-1: where every body stands, rebuilt from the log alone, so the presence check can hold an act
+    between the player's body and someone in the open to reach (B1.3) without asking the engine. It follows
+    who is possessed, each walker's route (an `activity` with its `from`, a `halt`), the tile a player
+    walked its body to (`moved`), and the time inside the tick of the last player act (`f`), which is the
+    time the engine judges reach at."""
+
+    def __init__(self, sim: Sim):
+        self.map = sim.map
+        self.held = sim.state.get("player", {}).get("agent")
+        self.routes = {a["id"]: {k: a["route"][k] for k in ("from", "to", "depart")}
+                       for a in sim.state["agents"] if a["route"]}
+        self.at = {a["id"]: list(a["at"]) for a in sim.state["agents"] if "at" in a}
+        self.tick, self.f = sim.state["tick"], sim._f if sim._window == sim.state["tick"] else 0
+
+    def see(self, e: Event, where: dict):
+        """Take one event in, before `where` is updated for it."""
+        d, a = e.data, e.actor
+        if e.tick != self.tick:
+            self.tick, self.f = e.tick, 0
+        if e.kind == "possess":
+            self.held = d["agent"]
+        elif e.kind == "release":
+            self.held = None
+        elif e.kind == "act" and e.origin == "player":
+            self.f = d.get("f", 0)
+        elif e.kind == "activity":
+            r = self.routes.get(a)
+            if d["place"] != (r["to"] if r else where.get(a)):
+                self.at.pop(a, None)  # it sets off from the tile the player had put it on
+            if d.get("arrive", e.tick) == e.tick:
+                self.routes.pop(a, None)
+            elif "from" in d:
+                self.routes[a] = {"from": d["from"], "to": d["place"], "depart": e.tick}
+        elif e.kind == "halt":
+            self.routes[a] = {"from": d["pos"], "to": d["place"], "depart": d["depart"]}
+        elif e.kind in ("arrive", "wake"):
+            self.routes.pop(a, None)
+        elif e.kind == "moved":
+            self.routes.pop(a, None)
+            self.at[a] = list(d["pos"])
+
+    def tile(self, aid: int, where: dict) -> list[int]:
+        if aid in self.routes:
+            r = self.routes[aid]
+            return tile_at(r, self.map["places"][r["to"]]["anchor"], (self.tick - 1) * SUB + self.f, SUB)  # Sim.pos: t - 1
+        return self.at[aid] if aid in self.at else slot(own_tiles(self.map, where[aid]), aid)
+
+    def within(self, a: int, b: int, where: dict, tiles: int) -> bool:
+        return self.held in (a, b) and near(self.tile(a, where), self.tile(b, where), tiles)
+
+
+def presence_violations(events: list[Event], start: int, where: dict, bodies: Bodies | None = None) -> list[str]:
     """From the log alone, in event order: every talk, meet, snub, gift, ask, steal and buy happens
     between agents at the same place (never two walkers), and every buy at the market. `where` maps
-    agent id to place (None while walking) as of events[start]; it is updated in place."""
+    agent id to place (None while walking) as of events[start]; it is updated in place.
+
+    reach-1: with `bodies` (the positions, also from the log alone), an act between the player's body and
+    someone else may also happen with one of them in the open, when their tiles are within reach at the
+    act's time, or within sight for a hail; and a `halt` stops a walker on the tile its route puts it on."""
     out = []
     for e in events[start:]:
         d, a = e.data, e.actor
+        if bodies is not None:
+            if e.kind == "halt" and (a not in bodies.routes or where.get(a) is not None
+                                     or (bodies.see(e, where), bodies.tile(a, where))[1] != d["pos"]):
+                out.append(f"event {e.id}: halt of {a}, who isn't walking there")
+            elif e.kind != "halt":
+                bodies.see(e, where)
         if e.kind == "activity":
             where[a] = d["place"] if d.get("arrive", e.tick) == e.tick else None
         elif e.kind in ("arrive", "wake", "moved"):  # moved (walk-1): the place holding its tile, or None in the open
             where[a] = d["place"]
-        other = d.get(TOGETHER.get(e.kind, ""))
+        other, tiles = d.get(TOGETHER.get(e.kind, "")), REACH
         if e.kind == "receipt" and (d["ok"] or d["why"] == "caught"):
             other = d.get("to", d.get("victim"))
+            tiles = SEE if d["action"] == "hail" else REACH
             if d["action"] == "buy_food" and where.get(a) != "market":
                 out.append(f"event {e.id}: bought away from the market")
-        if other is not None and (where.get(a) is None or where.get(a) != where.get(other)):
+        if other is None:
+            continue
+        if where.get(a) is not None and where.get(other) is not None:
+            ok = where[a] == where[other]
+        else:
+            ok = bodies is not None and bodies.within(a, other, where, tiles)
+        if not ok:
             out.append(f"event {e.id}: {e.kind} between {a} at {where.get(a)!r} and {other} at {where.get(other)!r}")
     return out
 
@@ -210,6 +279,7 @@ class Checker:
         self.sim = sim
         self.traits = [dict(a["traits"]) for a in sim.state["agents"]]
         self.where = {a["id"]: a["place"] for a in sim.state["agents"]}
+        self.bodies = Bodies(sim)  # reach-1: where each one stands, followed from the log
 
     def before(self, acts=()):
         """Call right before sim.step(acts)."""
@@ -248,7 +318,7 @@ class Checker:
             out.append(f"chest ledger: {chest - self._chest} vs {tithed - spent - alms}")
         out += state_violations(sim)
         out += log_violations(sim.events, n0)
-        out += presence_violations(sim.events, n0, self.where)
+        out += presence_violations(sim.events, n0, self.where, self.bodies)
         out += deal_violations(sim.events, n0, sim.state.get("player", {}).get("agent"))
         if [a["traits"] for a in sim.state["agents"]] != self.traits:
             out.append("a mind changed someone's traits")

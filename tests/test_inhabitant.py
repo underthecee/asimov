@@ -11,8 +11,8 @@ from asiimov import inhabitant, live, persist
 from asiimov.events import read_jsonl
 from asiimov.minds import NoisyMind, StubMind
 from asiimov.replay import replay
-from asiimov.sim import TICKS_PER_DAY, Sim
-from asiimov.worldmap import SEE, near, place_at
+from asiimov.sim import SUB, TICKS_PER_DAY, Sim
+from asiimov.worldmap import SEE, near, place_at, tile_at
 from test_live import WS
 
 SEED, AGENTS = 4, 10
@@ -200,8 +200,14 @@ def test_an_inhabitant_is_sent_nothing_it_could_not_perceive(tmp_path):
                 assert place_at(runner.sim.map, p["pos"]) == v["place"], "a position of someone not at its place"
                 stats["present"] += 1
             for p in v["seen"]:  # and the only other positions are of those in sight across open ground
-                assert (v["place"] is None or p["place"] is None) and near(v["pos"], p["pos"], SEE), \
-                    "a position of someone out of sight"
+                # reach-1: one that walks by later in the tick is listed with the tiles it is seen on, and those only
+                r, places = v["route"], runner.sim.map["places"]  # where its own body is then: one tick behind its route
+                me_at = lambda f: v["pos"] if r is None else tile_at(r, places[r["to"]]["anchor"], (v["tick"] - 1) * SUB + f, SUB)
+                for f, x, y in p.get("track", [[0] + p["pos"]]):
+                    assert (v["place"] is None or p["place"] is None) and near(me_at(f), [x, y], SEE), \
+                        "a position of someone out of sight"
+                assert p["pos"] == p.get("track", [[0] + p["pos"]])[0][1:] or p["in"][0] == 0
+                assert p.get("in", [0])[0] == 0 or p["route"] is None, "the route of someone not yet in sight"
                 stats["seen"] += 1
             assert "agents" not in v
         here = {p["id"] for p in m["view"]["present"] + m["view"]["seen"]} if m["type"] == "tick" else set()

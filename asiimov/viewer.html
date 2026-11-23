@@ -280,7 +280,7 @@ function drawMap() {
   }
   for (const [id, [, , act, from, to, depart]] of walking) {  // along the L path, x first, as the engine walks
     if (!MAP || !from || (to !== null && !MAP[to])) continue;
-    const [tx, ty] = to === null ? from : MAP[to].anchor; let [x, y] = from, left = V.map.walk * (S.t - depart);  // to null: a player's body standing in the open
+    const [tx, ty] = to === null ? from : MAP[to].anchor; let [x, y] = from, left = V.map.walk * Math.max(0, S.t - depart);  // to null: a player's body standing in the open
     const dx = Math.min(left, Math.abs(tx - x)); x += tx >= x ? dx : -dx;
     const dy = Math.min(left - dx, Math.abs(ty - y)); y += ty >= y ? dy : -dy;
     const c = roleColor(A[id].role);

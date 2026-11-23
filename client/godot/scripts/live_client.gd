@@ -198,7 +198,7 @@ static func menu(v: Dictionary) -> Array:
 	## The buttons for a view: one per offered action, or per action and person it may name. Straight from
 	## the server's offer; the client adds nothing and drops nothing.
 	var names := {}
-	for p in v.get("present", []) + v.get("kin", []):
+	for p in v.get("present", []) + v.get("kin", []) + v.get("seen", []):  # seen: in reach, or walking by (reach-1)
 		names[int(p["id"])] = p["name"]
 	var out := []
 	var offer: Dictionary = v.get("offer", {})

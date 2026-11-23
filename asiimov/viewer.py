@@ -57,7 +57,8 @@ def moves(events: list[dict]) -> dict[int, list[list]]:
     """Each villager's [tick, place, activity] changes. At tick t a villager is at the last entry with
     tick <= t, which is their state after tick t ran. tests/test_viewer.py checks this against the sim.
     On a map log a walker's place is None and its entry carries [from, to, depart]: it left `from` at
-    tick `depart` for place `to`, at the map's walking speed. A player's walked body (walk-1) standing in
+    tick `depart` for place `to`, at the map's walking speed (reach-1: a `halt` re-bases a stopped walker's
+    entry, with a `depart` still to come, and until then it stands on `from`). A player's walked body (walk-1) standing in
     the open has place None and [tile, None, tick]: it stands on `tile`, bound for nowhere."""
     pop = events[0]["data"]["population"]
     home = {a["id"]: pop["families"][a["family"]]["home"] for a in pop["agents"]}
@@ -80,6 +81,8 @@ def moves(events: list[dict]) -> dict[int, list[list]]:
             put(aid, e["tick"], None, d["activity"], walk)
         elif kind == "activity":
             put(aid, e["tick"], d["place"], d["activity"])
+        elif kind == "halt":  # reach-1: a walker stopped on its way stands on `pos` until `depart`, then walks on
+            put(aid, e["tick"], None, out[aid][-1][2], [d["pos"], d["place"], d["depart"]])
         elif kind == "arrive":
             put(aid, e["tick"], d["place"], out[aid][-1][2])
         elif kind == "moved":  # walk-1: a player's step; in the open the body stands on its tile

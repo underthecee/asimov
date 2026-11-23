@@ -226,7 +226,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "time-1a": "8ec013166d9fc8ecc96ff275acdfe859929be833f479c808d74cfb76d50457ba",  # time-1a: an act carries its time inside the tick and a walk is bounded by it, on space-1, before its number; no player: only the engine field differs
           "41": "6e5764944e66ea23394ba99595bd7182bc89d7db410f6291e6b4fa1b2d7611b2",  # time-1a (#113), an act carries its time inside the tick and a walk is bounded by it; no player: only the engine field differs
           "time-1b": "4943672f2428c2b1037619061b26dfdfa5b41871462df6eb24fc001f62be1770",  # time-1b: every act but a line said lands as it is recorded and holds the body for its cost, on time-1a, before its number; no player: only the engine field differs
-          "42": "cb2064f6dd6049bb7caac2c9c4cd99ef4cbd39c359ad91ebc6b3e2e7ac0e0241"}  # time-1b (#114), every act but a line said lands as it is recorded and holds the body for its cost; no player: only the engine field differs
+          "42": "cb2064f6dd6049bb7caac2c9c4cd99ef4cbd39c359ad91ebc6b3e2e7ac0e0241",  # time-1b (#114), every act but a line said lands as it is recorded and holds the body for its cost; no player: only the engine field differs
+          "reach-1": "6f5ed9820cd4628047009cf5be7e60881ef10f354a9804a8263cb43cc7df777d"}  # reach-1: the player's acts reach a tile across open ground, it can hail a walker in sight, bodies are seen one tick behind their routes, on time-1b, before its number; no player: only the engine field differs
 
 
 def test_log_changes_bump_the_engine_version():

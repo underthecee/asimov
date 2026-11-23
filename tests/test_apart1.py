@@ -129,7 +129,9 @@ def test_the_sentence_is_in_the_prompt_exactly_when_the_two_are_apart(seed, talk
         occ = view.get("occasion") or {}
         if kind == "answer" and (occ.get("move") or sim._talk_params()["typed"]):
             req = sim.pending[a["id"]][0]
-            together = sim._together(a, sim.state["agents"][occ["who"]])
+            # reach-1: with the player's body, "together" is one place or within a tile across open ground
+            # (Sim._near, Steering 2026-11-23 20:24Z): a villager that has just set off still stands beside it
+            together = sim._near(a, sim.state["agents"][occ["who"]])
             built[(sim.state["tick"], a["id"])] = together
             assert (f", as {APART}." in req.prompt) == (not together), req.prompt[-600:]
             offered = req.view.get("answers", []) + req.view.get("gives", [])

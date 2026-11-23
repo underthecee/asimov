@@ -184,6 +184,11 @@ def test_the_held_typed_path_with_pace_2_on_is_pinned(monkeypatch, seed):
     from asiimov import sim as S
     monkeypatch.setattr(S, "ENGINE_VERSION", "pace-2")
     monkeypatch.setattr(R, "ENGINE_VERSION", "pace-2")
+    # reach-1 lets the player's line and acts reach a villager within a tile across open ground (one that has just
+    # set off, say), which these pins predate; this test is about pace-2, so it runs with reach as "at one place"
+    # (the pins then still hold byte for byte, which is also the proof that reach-1 moves nothing else in a
+    # player's world). tests/test_reach.py covers reach itself.
+    monkeypatch.setattr(S.Sim, "_near", lambda self, a, b: self._together(a, b))
     log, flown, sim = held_log(seed)
     assert flown > 20, "not vacuous: calls flew"
     assert any(e.kind == "mind_answer" for e in sim.events) and any(e.kind == "mind_decide" for e in sim.events)

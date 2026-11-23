@@ -198,6 +198,11 @@ def test_a_world_without_the_flag_is_byte_identical_to_before_think_1(monkeypatc
     # pace-2 moves when a held world's plans land, which these pins predate; this test is about the think flag, so it
     # runs with pace-2 off (the pins then still hold byte for byte). tests/test_pace2.py covers pace-2 itself.
     monkeypatch.setattr(S.Sim, "_pace2", lambda self: False)
+    # reach-1 lets the player's line and acts reach a villager within a tile across open ground (one that has just
+    # set off, say), which these pins predate; this test is about the think flag, so it runs with reach as "at one place"
+    # (the pins then still hold byte for byte, which is also the proof that reach-1 moves nothing else in a
+    # player's world). tests/test_reach.py covers reach itself.
+    monkeypatch.setattr(S.Sim, "_near", lambda self, a, b: self._together(a, b))
     talk = PRIVATE if name == "typed" else {"consent": "private"}
     log, decided = day_log(talk, seed)
     assert decided >= 2, "vacuous: no private decision in the day"

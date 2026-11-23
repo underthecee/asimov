@@ -101,15 +101,16 @@ def test_a_walkers_position_is_its_route_at_any_time_and_its_tile_is_the_floor()
     a = _walker(sim, long=True)
     r, tick = a["route"], sim.state["tick"]
     to = sim.map["places"][r["to"]]["anchor"]
-    assert sim.pos(a) == sim.pos(a, tick) == sim._pos(a) == position(r, to, tick)  # whole ticks: as before
+    # reach-1: a body is seen one tick behind its route, so a walk shows from its start (Sim.pos)
+    assert sim.pos(a) == sim.pos(a, tick) == position(r, to, tick - 1) and sim._pos(a) == position(r, to, tick)
     last = None
     for k in range(0, 601, 7):  # sim-seconds into the tick (contracts B2.1: steps of 1/600)
         t = tick + Fraction(k, 600)
         p = sim.pos(a, t)
-        assert p == position(r, to, t)
+        assert p == position(r, to, t - 1)
         gone = abs(p[0] - r["from"][0]) + abs(p[1] - r["from"][1])
         full = abs(to[0] - r["from"][0]) + abs(to[1] - r["from"][1])
-        assert gone == min(full, WALK * (t - r["depart"])), "WALK tiles a tick along the L path"
+        assert gone == min(full, WALK * (t - 1 - r["depart"])), "WALK tiles a tick along the L path"
         assert p[1] == r["from"][1] or p[0] == to[0], "x first, then y"
         assert sim.tile(a, t) == [int(p[0] // 1), int(p[1] // 1)] and all(type(v) is int for v in sim.tile(a, t))
         assert last is None or gone >= last
@@ -152,10 +153,18 @@ def test_in_the_open_sight_is_six_tiles_and_reach_is_the_next_tile():
     v = inhabitant.view(sim, b)
     assert v["present"] == [] and v["pos"] == open_tile(sim)
     truth = {a["id"] for a in sim.state["agents"] if a["id"] != b and near(sim.tile(a), me["at"], SEE)}
-    assert truth and {s["id"] for s in v["seen"]} == truth == set(inhabitant.sight_ids(sim, b))
-    for s in v["seen"]:  # what draws each one: its tile, its place, and its route if it walks
+    now = [s for s in v["seen"] if s.get("in", [0])[0] == 0]  # reach-1: the rest walk into sight later this tick
+    assert truth and {s["id"] for s in now} == truth == set(inhabitant.sight_ids(sim, b))
+    for s in v["seen"]:
+        if s not in now:  # only the tiles it will be seen on, from the first: no route, no place
+            assert set(s) == {"id", "name", "role", "place", "pos", "route", "in", "track"} and s["route"] is None
+            assert s["pos"] == s["track"][0][1:] and all(near(k[1:], me["at"], SEE) for k in s["track"])
+    for s in now:  # what draws each one: its tile, its place, and its route if it walks
         a = sim.state["agents"][s["id"]]
-        assert set(s) == {"id", "name", "role", "asleep", "place", "pos", "route"}
+        # reach-1: one a tile away is in reach and shows whether it sleeps; the rest only where they stand
+        assert set(s) == {"id", "name", "role", "place", "pos", "route"} | ({"reach", "asleep"} if sim.reach(me, a) else set()) \
+            | ({"in", "track"} if a["route"] else set())
+        assert s.get("reach", False) is sim.reach(me, a)
         assert s["pos"] == sim.tile(a) and s["place"] == a["place"] and (s["route"] is None) == (a["route"] is None)
     # reach: the body's own tile or the next one, diagonals too; two tiles off is out of reach, but in sight
     plaza = [a for a in sim.state["agents"] if a["place"] == "plaza"]
@@ -183,8 +192,8 @@ def test_from_inside_a_place_it_sees_a_walker_passing_within_six_tiles():
             v = inhabitant.view(sim, a["id"])
             ids = {p["id"] for p in v["present"]}
             assert not ids & {s["id"] for s in v["seen"]}, "seen holds only those who aren't here with it"
-            for s in v["seen"]:
-                assert s["place"] is None and s["route"] is not None and near(s["pos"], v["pos"], SEE)
+            for s in v["seen"]:  # walkers: in sight now with their route, or (reach-1) walking into sight later this tick
+                assert s["place"] is None and (s["route"] is not None) == (s["in"][0] == 0) and near(s["pos"], v["pos"], SEE)
                 seen += 1
     assert seen
 
@@ -218,7 +227,7 @@ def test_an_inhabitant_witnesses_what_someone_in_sight_does_and_nothing_beyond(t
         events = [json.loads(e.to_json()) for e in r.sim.events[n:]]
         m = r.inhabitant_tick(tick, events, b)
         sight = set(inhabitant.sight_ids(r.sim, b))
-        assert {p["id"] for p in m["view"]["present"] + m["view"]["seen"]} == sight
+        assert {p["id"] for p in m["view"]["present"] + m["view"]["seen"] if p.get("in", [0])[0] == 0} == sight
         for e in m["events"]:
             mine = e["actor"] == b or e["kind"] == "fire" or b in [e["data"].get(f) for f in inhabitant.NAMES]
             assert mine or e["actor"] in sight, ("an event from beyond its sight", e)

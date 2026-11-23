@@ -74,6 +74,8 @@ def session_whys() -> set[str]:
                     act.update(target=rng.randrange(24), text="Good day to you.")
                 elif act["action"] in getattr(S, "WALK_ACTS", ()):  # walk-1: a step to a tile
                     act["to"] = [rng.randint(-8, 8), rng.randint(-8, 8)]
+                elif act["action"] in getattr(S, "HAIL_ACTS", ()):  # reach-1: a call to someone walking by
+                    act["target"] = rng.randrange(24)
                 elif rng.random() < 0.8:
                     act["target"] = rng.randrange(24)
                 acts = [act] * (2 if rng.random() < 0.05 else 1)

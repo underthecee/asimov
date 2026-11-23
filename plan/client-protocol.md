@@ -75,9 +75,19 @@ It gets:
   a walker the tile its route puts it on. `seen` lists those in sight who aren't in `present`: with the body
   or them out in the open, everyone within 6 tiles (diagonals count as one). Each is `{id, name, role, asleep,
   place, pos, route}`, with `route` as the view's own (`from, to, depart, arrive`) so a client can draw a
-  walker between ticks with worldmap.position. Seen is not in reach: nothing is offered toward them. Events
+  walker between ticks with worldmap.position. Events
   by those in `seen` are witnessed on their tick as events by those in `present` are. Two places hide each
   other, however close their tiles.
+  With reach-1 (plan/player-body-spec.md): a walker's position at time t is its route at t - 1. One of `seen`
+  within a tile of the body carries `reach: true` and `asleep`: it can be spoken to and named in an act, and
+  `offer` names it. The others carry neither, and nothing but `hail` is offered toward them. Every walker in
+  sight at some time in the coming tick is listed, with `in: [f0, f1]` (the span of the tick it is in sight
+  for, in 600ths) and `track: [[f, x, y], ...]` (the tiles it is seen on then); a client draws it along
+  `track` while its clock is inside `in`, and not otherwise. One that comes into sight later in the tick has
+  `route: null` and `pos` where it is first seen. `offer.hail` lists the walkers the body can call to.
+  Events by someone in sight who is not at the body's place or in reach arrive cut down to what sight shows
+  (`inhabitant.SIGHT`): `activity` (place, arrive, from), `arrive`, `halt`, and `said`, `reply` and `talk`
+  with whom, never the words.
 
 "Both" (an inhabitant and a god connection held by one person, gated on run.json `"divine": true`) is
 not enforced yet. God scope is the dev and review tool until a game design says what divine power
@@ -117,6 +127,12 @@ sent twice and none skipped.
     a tick (a second gets `"one act per tick"`), and is acked then. A `say` followed in the same tick by
     `release`, or by a `possess` of another body, gets a `"released"` receipt and never resolves; any other
     act before the release has already landed.
+  - `act` with `{"action": "hail", "target": id}` (reach-1, the player's alone): calls to a villager walking by
+    within sight (6 tiles) at the act's time. It costs the body nothing and carries no words. The walker stops
+    where it is for 3 ticks (a `halt` event by the walker, `{pos, place, depart, arrive}`, citing the act),
+    and the receipt says `hailed`; `already stopped` (ok) for one that already waits, which gains no time;
+    refused `target not in sight`, or `not walking` for one at a place. A line said to it, or an act on it
+    from within reach, starts its wait again. `target` is required.
   - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
     x first, as far as walking speed allows since its last walk: it earns `map.walk` tiles a tick as sim-time
     passes and keeps at most one tick's walking while it stands (time-1a). A walk that asks for more is cut
