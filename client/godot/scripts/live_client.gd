@@ -31,6 +31,9 @@ var tick_wall := 0.0    # Time.get_ticks_msec() when the latest view arrived, fo
 var tps := 1.0
 var paused := false
 var acks := {}          # intent id -> ack
+var walk_want = null    # inhabitant, walk-1: the tile the player has walked to on screen and not yet sent (Vector2i)
+var walk_sent = null    # the last tile sent
+var walks := {}         # walk intents sent and not yet acked: id -> tile
 var _hello_sent := false
 var _closed := false
 var _reload := false   # the server refused our since (the world reopened shorter after a crash)
@@ -112,6 +115,7 @@ func _handle(text: String) -> void:
 			ticked.emit(m)
 		"ack":
 			acks[str(m["id"])] = m
+			walks.erase(str(m["id"]))
 			acked.emit(m)
 		"heard":
 			heard.emit(m)
@@ -150,6 +154,7 @@ func act(action: String, target: int = -1, place: String = "", text: String = ""
 	## Inhabitant scope: the body's act. Its ack names the act event; the receipt follows in a tick's events.
 	## `place` is go_to's (engine 24), and only go_to's; `text` is say's (say-1), and only say's. `move` (talk-1) is
 	## a say's chip, "asks_food" or "wants_to_buy_food"; a buy carries the `price` shown.
+	flush_walk()  # the engine judges an act where the body stands: the step taken on screen goes first
 	_seq += 1
 	var id := "i%x%x-%d" % [Time.get_ticks_usec(), randi(), _seq]
 	var args := {"action": action}
@@ -165,6 +170,25 @@ func act(action: String, target: int = -1, place: String = "", text: String = ""
 		args["price"] = price
 	_send({"type": "intent", "id": id, "verb": "act", "args": args, "seen_tick": view_tick})
 	return id
+
+
+func walk(tile: Vector2i) -> String:
+	## Inhabitant scope, walk-1: step the body toward `tile`. The engine moves it at most `walk` tiles a tick
+	## and answers with a `moved` event carrying where it stands and which place that is. Not the tick's one act.
+	_seq += 1
+	var id := "w%x%x-%d" % [Time.get_ticks_usec(), randi(), _seq]
+	walk_sent = tile
+	walk_want = null
+	walks[id] = tile
+	_send({"type": "intent", "id": id, "verb": "act", "args": {"action": "walk", "to": [tile.x, tile.y]},
+			"seen_tick": view_tick})
+	return id
+
+
+func flush_walk() -> void:
+	if walk_want != null and walk_want != walk_sent:
+		walk(walk_want)
+	walk_want = null
 
 
 static func menu(v: Dictionary) -> Array:

@@ -12,6 +12,7 @@ the agent can and can't see or do is the client's own UI (plan/ai-playtest.md).
     python scripts/aiplay.py type DIR "hello there" --shot
     python scripts/aiplay.py key DIR Return
     python scripts/aiplay.py key DIR ctrl+a                          # a key with ctrl, shift, alt or cmd held: here, select the Talk line whole
+    python scripts/aiplay.py hold DIR d 2.5 --shot         # hold a key down for 2.5 s, as a person walks with W A S D; "w+d 2" holds both
     python scripts/aiplay.py resize DIR 1440x1100          # make the window bigger or smaller, as a person drags it
     python scripts/aiplay.py stop DIR                      # close the client (the player leaves) and the screen
 
@@ -296,6 +297,17 @@ def do(a):
             if not (_chord(dpy, name) if chord else _key(dpy, keysym(name))):
                 raise SystemExit(f"no key for {name!r}")
         rec.update(keys=a.keys)
+    elif a.cmd == "hold":
+        from Xlib import X
+        codes = [dpy.keysym_to_keycode(keysym(k)) for k in a.keys.split("+")]
+        if 0 in codes or not 0 < a.seconds <= 60:
+            raise SystemExit(f"hold takes keys on this keyboard and 0 to 60 seconds, not {a.keys!r} {a.seconds}")
+        for code in codes:
+            _fake(dpy, X.KeyPress, code)
+        time.sleep(a.seconds)
+        for code in reversed(codes):
+            _fake(dpy, X.KeyRelease, code)
+        rec.update(keys=a.keys, seconds=a.seconds)
     dpy.close()
     _log(a.dir, **rec)
     if a.shot is not None:
@@ -325,7 +337,7 @@ def main(argv=None):
     p.add_argument("dir")
     p.add_argument("size")
     sub.add_parser("stop").add_argument("dir")
-    for name in ("click", "scroll", "type", "key"):
+    for name in ("click", "scroll", "type", "key", "hold"):
         p = sub.add_parser(name)
         p.add_argument("dir")
         if name in ("click", "scroll"):
@@ -340,6 +352,9 @@ def main(argv=None):
             p.add_argument("text")
         if name == "key":
             p.add_argument("keys", nargs="+")
+        if name == "hold":
+            p.add_argument("keys", help="a key, or several joined by +, held together")
+            p.add_argument("seconds", type=float)
         p.add_argument("--shot", type=float, nargs="?", const=1.0, default=None,
                        help="then wait this many seconds (default 1) and take a screenshot")
         p.add_argument("--crop", help="with --shot: X,Y,W,H, only this part of the window")

@@ -333,6 +333,29 @@ def test_a_session_of_walks_and_acts_keeps_every_invariant_and_replays_exactly(s
     assert replay(events).state_hash() == sim.state_hash()
 
 
+def test_the_viewer_places_a_walked_body_from_the_log_alone():
+    from asiimov.viewer import moves
+    sim, b = awake_body()
+    rng, truth = random.Random(5), []
+    x0, y0, x1, y1 = bounds(sim.map)
+    start = sim.state["tick"]
+    for i in range(TICKS_PER_DAY):
+        acts = [walk(rng.randint(x0, x1), rng.randint(y0, y1))] if rng.random() < 0.5 else []
+        if i % 17 == 16:
+            acts.append({"kind": "act", "action": "go_to", "place": "market"})
+        sim.step(acts)
+        a = sim.state["agents"][b]
+        truth.append((a["place"], a["activity"], a.get("at")))
+    mv = moves([json.loads(e.to_json()) for e in sim.events])[b]
+    for i, (place, activity, at) in enumerate(truth):
+        m = next(x for x in reversed(mv) if x[0] <= start + i)
+        assert m[1:3] == [place, activity], (i, m)
+        if place is None and at is not None:  # standing in the open: the page draws it on its tile
+            assert m[3:5] == [at, None], (i, m)
+    assert any(p is None and at is not None for p, _, at in truth) \
+        and any(p is not None and at is not None for p, _, at in truth) and any(p is None and at is None for p, _, at in truth)
+
+
 def test_a_snapshot_keeps_the_tile():
     sim, b = awake_body()
     tile = open_tile(sim)

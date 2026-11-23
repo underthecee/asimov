@@ -162,6 +162,29 @@ A god-scope session is unchanged and keeps `fire`. "Both" is one person holding 
 inhabitant and a god, allowed only when the world's run.json says `"divine": true`. The god connection
 is the dev/review tool until a game design says what divine power costs.
 
+## Walking tile by tile (walk-1, joon 2026-11-22: "a real playable experience. wasd, interaction keys")
+- `walk {to: [x, y]}` is a player act and no mind's (`sim.WALK_ACTS`, in `PLAYER_ACTIONS` only), so a world
+  with no walk writes the log engine 38 writes, but for the engine field (tests/test_walk.py).
+- The engine holds the tile (`agent["at"]`), not the client. A walked body's place is the place whose rectangle
+  holds its tile (`worldmap.place_at`), or None in the open, where it is with nobody and nothing that needs
+  someone is offered. Every rule that asks where a villager is (`Sim._pos`, occupancy, the offer, the view)
+  reads the same tile, so a later rule about things on tiles has the body's tile to check.
+- A walk is applied when it is recorded, at the start of its tick or late at the fixed point, and is not the
+  tick's one act. It moves at most `WALK` tiles a tick over all the walks of that tick
+  (`state.player.walk = [tick, used]`), x first, the same path and speed as a villager's route.
+- Each walk emits `moved {from, pos, place}` (origin rule, parent: the act). A sleeper's walk, or one at or
+  after bedtime, is a failed receipt ("asleep", "bedtime"); the engine walks the body home at bedtime as it
+  does every villager.
+- The body stands where it stopped (`override {do: "roam"}`, activity `visit`) for `DEFAULT_STEP_TICKS`, then
+  the day's plan takes over; any other act replaces the stand, and `go_to`, `seek` and a gift set out from the
+  tile. A walk stops a route where the body is. A seeker bound for a body in the open waits where it is.
+- Walking out of a place settles the asks held there as declined (`_settle_ask`), before the asker's wait ends.
+- The live runner pulls a tick for a walk only when its tile is in another place than the body's (or in the
+  open from a place, or the reverse): steps inside one place ride the next tick, so holding a key doesn't
+  drive the world's clock. The client draws its own body between ticks at the engine's speed and takes the
+  engine's tile when the keys are up and every walk is acked; it predicts nothing else.
+- This replaces the `walk {place}` idea under "What would change this": a tile, not a place.
+
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical
    to the previous engine's apart from the genesis `engine` field, and the state hash at every
