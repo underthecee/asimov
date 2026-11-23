@@ -253,9 +253,10 @@ def test_a_world_on_engine_38s_trade_stake_writes_engine_38s_log_and_holds_no_go
     import asiimov.sim as S
     from test_world import FIRE, GOLDEN, run
     on_38(monkeypatch)
-    monkeypatch.setattr(S, "ENGINE_VERSION", "38")
-    s = run(StubMind(), agents=20, days=2, seed=3, player=FIRE)
-    assert hashlib.sha256("".join(e.to_json() + "\n" for e in s.events).encode()).hexdigest() == GOLDEN["38"]
+    for engine in ("38", "39"):  # 39 = walk-1, which leaves a world nobody walks in as it was
+        monkeypatch.setattr(S, "ENGINE_VERSION", engine)
+        s = run(StubMind(), agents=20, days=2, seed=3, player=FIRE)
+        assert hashlib.sha256("".join(e.to_json() + "\n" for e in s.events).encode()).hexdigest() == GOLDEN[engine]
     assert any(e.kind == "receipt" and e.data["action"] == "trade" and e.data["ok"] for e in s.events)  # not vacuous
     sim = Sim(3, 100, StubMind())
     check, bad = Checker(sim), []
@@ -273,3 +274,17 @@ def test_some_of_the_goods_keys_without_the_rest_is_refused():
         tr = {x: v for x, v in TR.items() if x not in GOODS_KEYS or x == k}
         with pytest.raises(ValueError, match="trade:"):
             Sim(1, 20, StubMind(), genesis={**generate_population(1, 20), "stakes": {**DEFAULT_STAKES, "trade": tr}})
+
+
+def test_on_engine_38s_stake_a_villager_over_its_sickness_has_its_inputs_back(monkeypatch):
+    """supply-1's restock, which only worlds without the goods keys run (Review of #111, note 1): a sick villager
+    makes no supply run, so getting over it stamps its inputs as of that day. With goods it keeps its unit instead."""
+    from test_stakes import SICK, _awake_adult, _sick_world
+    on_38(monkeypatch)
+    sim = _sick_world()
+    a = _awake_adult(sim, "crafter")
+    sim._make_sick(a, [])
+    sim.run_until(sim.state["tick"] + SICK["days"] * TICKS_PER_DAY + 1)
+    rec = next(e for e in sim.events if e.kind == "recover" and e.actor == a["id"])
+    assert sim._trade_needs(a) and a["supplied"] == {n: rec.tick // TICKS_PER_DAY for n in sim._trade_needs(a)}
+    assert "used" not in a and not any(g in a["inv"] for g in TRADE_GOOD.values())

@@ -6,7 +6,7 @@ violation strings instead of raising, so a long run can report every one it hits
 """
 from .events import ORIGINS, Event
 from .sim import GOODS_KEYS, PERSON_STEPS, RULE_STEPS, STEP_DOS, TRADE_GOOD, Sim
-from .worldmap import travel_ticks
+from .worldmap import on_map, place_at, travel_ticks
 
 BOOL_FIELDS = ("asleep", "has_food", "kin", "talk")  # talk: an answer's own hold (say-3)
 
@@ -37,6 +37,10 @@ def map_violations(sim: Sim, a: dict, longest: int) -> list[str]:
     """An agent is at a place on the map or walking, never both; a walk's arrival is in the future and
     exactly its travel time after it set out; sleepers are at home. Checked between ticks."""
     places, aid, r = sim.map["places"], a["id"], a["route"]
+    if "at" in a:  # walk-1: a body the player walked stands on a tile, and its place is the one that holds the tile
+        ok = (r is None and on_map(sim.map, a["at"]) and a["place"] == place_at(sim.map, a["at"])
+              and (not a["asleep"] or a["place"] == a["home"]))
+        return [] if ok else [f"agent {aid} at tile {a['at']!r}, place {a['place']!r}, route {r} (asleep {a['asleep']})"]
     if r is None:
         ok = a["place"] in places and (not a["asleep"] or a["place"] == a["home"])
         return [] if ok else [f"agent {aid} at {a['place']!r} (asleep {a['asleep']})"]
@@ -60,7 +64,7 @@ def presence_violations(events: list[Event], start: int, where: dict) -> list[st
         d, a = e.data, e.actor
         if e.kind == "activity":
             where[a] = d["place"] if d.get("arrive", e.tick) == e.tick else None
-        elif e.kind in ("arrive", "wake"):
+        elif e.kind in ("arrive", "wake", "moved"):  # moved (walk-1): the place holding its tile, or None in the open
             where[a] = d["place"]
         other = d.get(TOGETHER.get(e.kind, ""))
         if e.kind == "receipt" and (d["ok"] or d["why"] == "caught"):
@@ -205,6 +209,10 @@ def state_violations(sim: Sim) -> list[str]:
                 if not (s is a["override"] and s["target"] is None and s["place"] in sim.map["places"]
                         and sim.state.get("player", {}).get("agent") == aid):
                     out.append(f"agent {aid} go step {s}")
+            elif s["do"] == "roam":  # walk-1: the possessed body stands where the player walked it
+                if not (s is a["override"] and s["target"] is None and "at" in a
+                        and sim.state.get("player", {}).get("agent") == aid):
+                    out.append(f"agent {aid} roam step {s}")
             elif s["do"] not in STEP_DOS and not (s["do"] in RULE_STEPS and s is a["override"]):
                 out.append(f"agent {aid} step {s}")
             elif s["do"] in PERSON_STEPS + RULE_STEPS:

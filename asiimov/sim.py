@@ -17,6 +17,7 @@ whose tick is the first tick not run. `snapshot()`/`restore()` let a world conti
 in another process; asiimov.persist uses them to resume runs after a crash.
 """
 import hashlib
+from bisect import insort
 import re
 import json
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -29,7 +30,7 @@ from .memory import (REFLECT_ASK, assemble_decide, assemble_prompt, is_bare_valu
 from .minds import MindRequest, ReplayDivergence, dispatch
 from .params import generate_population
 from .rng import Rng
-from .worldmap import build_map, position, travel_ticks
+from .worldmap import WALK, build_map, on_map, place_at, position, step_toward, travel_ticks
 
 TICKS_PER_DAY = 144
 VILLAGE_WAKE_MIN = 390  # 06:30
@@ -284,7 +285,8 @@ ACTION_CLAUSES = {
 }
 assert set(ACTION_CLAUSES) == set(DELIBERATE_ACTIONS)
 GO_ACTS = ("go_to",)  # the player walks its body to a named place and stays a while (go-to-1); never a mind's
-PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS  # what a player's act may name
+WALK_ACTS = ("walk",)  # the player steps its body to a tile, at most WALK tiles a tick (walk-1); never a mind's
+PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS + WALK_ACTS  # what a player's act may name
 
 
 def action_clauses(price: int) -> dict:
@@ -312,8 +314,8 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "goods-1a"  # goods-1a (plan/goods-1-design.md; Steering R1-R6, 2026-11-23 19:03Z): a trade's input is a good that is made at work, held, sold from stock and used up a day at a time. On 38.
-# 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "goods-1a"  # goods-1a (plan/goods-1-design.md; Steering R1-R6, 2026-11-23 19:03Z): a trade's input is a good that is made at work, held, sold from stock and used up a day at a time. On 39.
+# 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -792,6 +794,8 @@ class Sim:
         if act.get("kind") != "act":
             raise ValueError(f"only an act can arrive late, not {act.get('kind')!r}")
         eid = self._player({k: v for k, v in act.items() if k != "late"}, late=True)
+        if act.get("action") in WALK_ACTS:
+            return eid  # walk-1: taken in _player; it is no deliberation and leaves the tick's one act free
         a = self.state["agents"][self.state["player"]["agent"]]
         why = self._branch.get(a["id"])
         if why:
@@ -861,7 +865,8 @@ class Sim:
                      " A shop block takes you to the market, where you buy the food you need.")
         elif kind == "reflect":
             rest += REFLECT_ASK
-        where = f"You are at {a['place']}." if a["place"] else f"You are on your way to the {a['route']['to']}."
+        where = f"You are at {a['place']}." if a["place"] else \
+            f"You are on your way to the {a['route']['to']}." if a["route"] else "You are out in the open, between places."
         head = (f"Day {self.state['tick'] // TICKS_PER_DAY}, {m // 60:02d}:{m % 60:02d}. {where} "
                 f"Hunger {a['needs']['hunger']}/1000. You carry {a['inv']['food']} food and {a['inv']['coin']} coin. "
                 f"Here: ")
@@ -1085,8 +1090,8 @@ class Sim:
 
     def _pos(self, a: dict) -> list[int]:
         places = self.map["places"]
-        if not a["route"]:
-            return places[a["place"]]["anchor"]
+        if not a["route"]:  # walk-1: a body the player walked stands on its own tile, in a place or in the open
+            return list(a["at"]) if "at" in a else places[a["place"]]["anchor"]
         return position(a["route"], places[a["route"]["to"]]["anchor"], self.state["tick"])
 
     def _together(self, a: dict, b: dict) -> bool:
@@ -1104,6 +1109,8 @@ class Sim:
             arrive = tick + travel_ticks(frm, self.map["places"][place]["anchor"])
             a["place"], a["route"] = (place, None) if arrive == tick else \
                 (None, {"from": frm, "to": place, "depart": tick, "arrive": arrive, "event": None})
+            if a.pop("at", None) is not None and (a["override"] or {}).get("do") == "roam":
+                a["override"] = None  # walk-1: it leaves the tile the player put it on, and that stand is over
         a["activity"] = activity
         data = {"activity": activity, "place": place, "arrive": a["route"]["arrive"] if a["route"] else tick}
         new_route = a["route"] is not None and a["route"]["depart"] == tick
@@ -1251,10 +1258,14 @@ class Sim:
             return "visit", step["place"]
         if do == "stay":  # say-3: an answer's "stay": where it was, doing what it was, for the talk window
             return a["activity"], step["place"]
+        if do == "roam":  # walk-1: the body stands where the player walked it, in a place or in the open
+            return a["activity"], self._dest(a)
         if do in INSTANT_STEPS:  # acts where the agent already is, or is headed
             return a["activity"], self._dest(a)
         if do in REACH_STEPS:  # where the target is, or is walking to
-            return "visit", self._dest(self.state["agents"][t])
+            dest = self._dest(self.state["agents"][t])
+            # walk-1: a body the player has walked into the open is at no place: whoever seeks it waits where they are
+            return ("visit", dest) if dest is not None else (a["activity"], self._dest(a))
         if do == "avoid":
             return ("explore", ACTIVITY_PLACE["explore"]) if self._dest(self.state["agents"][t]) == a["home"] \
                 else ("home", a["home"])
@@ -2830,13 +2841,43 @@ class Sim:
         a second receipt marks the arrival."""
         here, tick, r = a["place"] == place, self.state["tick"], a["route"]
         # The walk starts on the next tick's _act, as every override's does, from where the body is then.
-        frm = self.map["places"][a["place"]]["anchor"] if r is None else \
-            position(r, self.map["places"][r["to"]]["anchor"], tick + 1)
+        frm = self._pos(a) if r is None else position(r, self.map["places"][r["to"]]["anchor"], tick + 1)
         arrive = tick if here else tick + 1 + travel_ticks(frm, self.map["places"][place]["anchor"])
         a["override"] = {"do": "go", "target": None, "place": place, "arrived": int(here), "event": eid,
                          "left": DEFAULT_STEP_TICKS}
         return self._receipt(a, eid, "go_to", True, "already here" if here else "heading there",
                              extra={"place": place, "arrive": arrive})
+
+    def _walk(self, a: dict, eid: int, to: list, late: bool):
+        """walk-1: the player's body steps toward tile `to`, x first and then y as every walker does, at most
+        WALK tiles in a tick over all its walks that tick. The engine holds the tile it stands on (a["at"]) and
+        says which place that is: the one whose rectangle holds the tile, or none in the open, where it is
+        with nobody, as a walker is. It stands there for a step's time, as go_to's body does, unless another
+        act or walk replaces that. A walk scheduled before the tick is taken before anyone looks around; a late
+        one (E4) at the tick's fixed point, after this tick's prompts were built, so villagers notice it next
+        tick. The outcome is a `moved` event citing the act, or a failed receipt for a sleeper or at bedtime."""
+        tick, p = self.state["tick"], self.state["player"]
+        if a["asleep"]:
+            return self._receipt(a, eid, "walk", False, "asleep")
+        if tick >= a["sleep_tick"] or a["needs"]["fatigue"] >= 1000:
+            return self._receipt(a, eid, "walk", False, "bedtime")  # the world walks it home, as for any act
+        used = p["walk"][1] if p.get("walk", [None])[0] == tick else 0
+        frm = self._pos(a)
+        pos = step_toward(frm, to, WALK - used)
+        was, place = a["place"], place_at(self.map, pos)
+        p["walk"] = [tick, used + abs(pos[0] - frm[0]) + abs(pos[1] - frm[1])]
+        a["place"], a["route"], a["at"], a["activity"] = place, None, pos, "visit"
+        a["override"] = {"do": "roam", "target": None, "event": eid, "left": DEFAULT_STEP_TICKS}
+        mid = self._emit("moved", "rule", a["id"], {"from": frm, "pos": pos, "place": place}, [eid])
+        if place != was:
+            if late:  # this tick's perception cache (L2): it is seen where it now stands
+                if a["id"] in self._occupancy.get(was, []):
+                    self._occupancy[was].remove(a["id"])
+                if place is not None:
+                    insort(self._occupancy[place], a["id"])
+            for q in list(p.get("asks", [])):  # it walked away from whoever was asking: declined (talk-1 §2.4)
+                self._settle_ask(q, 0, [eid])
+        return mid
 
     def _player(self, act: dict, late: bool = False):
         kind = act["kind"]
@@ -2872,8 +2913,14 @@ class Sim:
             if (action in GO_ACTS) != (place is not None) or action in GO_ACTS and \
                     (target is not None or not isinstance(place, str) or place not in self.map["places"]):
                 raise ValueError(f"act: go_to takes a place on the map and only go_to does ({action!r}, {place!r})")
+            to = act.get("to")
+            if (action in WALK_ACTS) != (to is not None) or action in WALK_ACTS and not (
+                    target is None and on_map(self.map, to)):
+                raise ValueError(f"act: walk takes a tile on the map, [x, y], and only walk does ({action!r}, {to!r})")
             aid = self.state["player"]["agent"]
             data = {"action": action} if target is None else {"action": action, "target": target}
+            if to is not None:
+                data["to"] = list(to)
             if place is not None:
                 data["place"], target = place, place  # go_to carries its place where a person act's target is
             if text is not None:
@@ -2886,6 +2933,9 @@ class Sim:
                 data["late"] = True  # it arrived mid-tick and applied at the fixed point (E4); replay keeps it there
             eid = self._emit("act", "player", aid, data, [self.state["player"]["event"]])
             self.state["player"]["order"] = self.state["tick"]
+            if action in WALK_ACTS:  # walk-1: a step is taken as it's recorded, and isn't the tick's one act
+                self._walk(self.state["agents"][aid], eid, to, late)
+                return eid
             self._acts.setdefault(aid, []).append((eid, action, target))
             return eid
         if kind == "fire":
@@ -2979,6 +3029,6 @@ class Sim:
         for eid, action, _ in self._acts.pop(a["id"], []):
             self._receipt(a, eid, action, False, "released")
         a["occasion"] = None  # the player handled whatever it was; the mind isn't asked about it later
-        if (a["override"] or {}).get("do") == "go":  # a player-only step never outlives the player
+        if (a["override"] or {}).get("do") in ("go", "roam"):  # a player-only step never outlives the player
             a["override"] = None
         return self._emit("release", "player", a["id"], {"agent": a["id"]}, [p["event"]])

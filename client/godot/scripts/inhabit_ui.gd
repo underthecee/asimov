@@ -363,6 +363,8 @@ static func status(v: Dictionary, me: Dictionary, per_day: int) -> String:
 	elif v.get("route") != null:
 		lines.append("Walking to %s, there at %s." % [place(v["route"]["to"], me),
 				clock(int(v["route"]["arrive"]), per_day).split(", ")[1]])
+	elif v["place"] == null:  # walk-1: you walked out of every place
+		lines.append("Out in the open, between places.")
 	else:
 		lines.append("%s at %s." % [NOW.get(str(v["activity"]), str(v["activity"])), place(v["place"], me)])
 	lines.append("Hunger %d/1000, %s." % [int(v["hunger"]), hunger_word(int(v["hunger"]))])
@@ -445,7 +447,9 @@ static func asks(v: Dictionary, names: Dictionary, secs_per_tick: float) -> Stri
 
 static func here(v: Dictionary, doing: Dictionary) -> String:
 	if v["present"].is_empty():
-		return "Nobody else is here." if v["place"] != null else "You're on the road."
+		if v["place"] != null:
+			return "Nobody else is here."
+		return "You're on the road." if v.get("route") != null else "Nobody: you're out in the open. Walk into a place to meet people."
 	var out := []
 	for p in v["present"]:
 		var tags := []

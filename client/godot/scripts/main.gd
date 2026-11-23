@@ -20,6 +20,7 @@ const Words := preload("res://scripts/inhabit_ui.gd")
 const Plan := preload("res://scripts/plan_queue.gd")
 const TalkBox := preload("res://scripts/talk_box.gd")
 const Art := preload("res://scripts/art.gd")
+const Keys := preload("res://scripts/walk_keys.gd")
 const PICKED_W := 380.0  # recorded mode: the "who is here" column
 const BUNDLED := "res://bundled/playback.json.gz"  # the world an export carries (CI puts it there before it exports)
 const COLORS := {"sleep": Color(0.35, 0.35, 0.5), "home": Color(0.6, 0.6, 0.7), "work": Color(0.85, 0.6, 0.2),
@@ -60,6 +61,12 @@ var bubbles := []           # inhabitant: words shown over their speaker (V3) {w
 var drawn_at := {}          # inhabitant: id -> where that villager was drawn this frame (for bubbles)
 const BUBBLE_S := 6.0       # a bubble shows this long, then fades; the line stays in "Said near you"
 var say_once := ""          # --say TEXT (dev, screenshots): say it once to the first villager here, awake
+var walk_pos := Vector2.ZERO # inhabitant, walk-1: where your body is drawn while the keys walk it, in tiles
+var walking := false         # the keys have the body: it is drawn at walk_pos, ahead of the engine's next tick
+var walk_at := -99.0         # when the last walk was sent, in seconds
+var walk_place = ""          # the place the engine last said you walked into (null: the open), for the log line
+var reach := -1              # the villager within reach of E, by where they are drawn
+var e_items := []            # the E list while it is open: [{label, action, target}]
 var picked := ""            # recorded mode: the place clicked, shown in the "who is here" panel
 var announced := false      # recorded mode: "playing" printed once, for the export's smoke test
 
@@ -431,6 +438,7 @@ func _on_inhabit_welcome(m: Dictionary) -> void:
 		names[int(f["id"])] = f["name"]
 		roles[int(f["id"])] = f.get("role", "")
 	_learn_names(m["view"])
+	walk_place = m["view"].get("place")
 	_refresh_inhabit()
 	get_tree().create_timer(1.0).timeout.connect(_catch_up)  # the backlog follows the welcome in chunks
 
@@ -513,6 +521,7 @@ func _on_inhabit_tick(m: Dictionary) -> void:
 		var day0 := int(v["tick"]) - int(v["tick"]) % client.ticks_per_day()
 		evs = client.seen_events.filter(func(e): return int(e["tick"]) >= day0)
 	_feed(evs)
+	_walk_lines(evs)
 	for e in evs:
 		if e.get("actor") != null and here.has(int(e["actor"])):
 			match e["kind"]:
@@ -544,6 +553,7 @@ func _on_early(m: Dictionary) -> void:
 	if not _caught_up:
 		return  # the catch-up on the first tick reads seen_events, these included
 	_feed(m["events"])
+	_walk_lines(m["events"])
 	_take_receipts(m["events"])
 	_lost_lines(m["events"])
 	_plan_run()
@@ -764,6 +774,118 @@ func _choose(action: String, target: int, place: String, label: String) -> void:
 	_refresh_inhabit()
 
 
+func _can_walk() -> bool:
+	## Whether this world's engine takes `walk` (walk-1): the welcome lists the tiles it may name.
+	return client != null and client.scope == "inhabitant" and client.welcome.get("verbs", {}).get("act", {}).has("to")
+
+
+func _typing() -> bool:
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit
+
+
+func _me_tiles() -> Vector2:
+	## Where your body is drawn, in tiles: where the keys have walked it, else where the engine has it.
+	return walk_pos if walking else Vector2(client.view["pos"][0], client.view["pos"][1])
+
+
+func _walk_keys(delta: float) -> void:
+	## walk-1: W A S D or the arrows walk your body. The engine holds where it stands and moves it at most
+	## `walk` tiles a tick; between ticks the body is drawn where the keys took it, at that same speed, and the
+	## tile is sent as a `walk`. When the keys are let go and every walk is answered, the engine's tile is drawn.
+	var v: Dictionary = client.view
+	if v.is_empty() or not _can_walk():
+		return
+	var engine := Vector2(v["pos"][0], v["pos"][1])
+	var dir := Vector2i.ZERO
+	if not _typing() and not v.get("asleep", true) and not client.paused:
+		dir.x = int(Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) \
+				- int(Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT))
+		dir.y = int(Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN)) \
+				- int(Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP))
+	var now := Time.get_ticks_msec() / 1000.0
+	var per_tick := int(client.welcome["world"]["map"]["walk"])
+	if dir != Vector2i.ZERO:
+		if not walking:
+			walking = true
+			walk_pos = engine
+		e_items = []
+		walk_pos = Keys.step(walk_pos, dir, Keys.speed(per_tick, client.tps) * delta, client.welcome["verbs"]["act"]["to"])
+		if absf(walk_pos.x - engine.x) + absf(walk_pos.y - engine.y) > 2.5 * per_tick:
+			walk_pos = engine  # the engine fell far behind what the screen showed: its tile stands
+		_walk_want()
+		if client.walk_want != null and now - walk_at >= Keys.SEND_S:
+			client.flush_walk()
+			walk_at = now
+	elif walking:
+		walk_pos = Vector2(Keys.tile(walk_pos))  # it stops on a tile
+		_walk_want()
+		if client.walk_want != null:
+			client.flush_walk()
+			walk_at = now
+		elif client.walks.is_empty():
+			walking = false  # every step is answered: the engine's tile is where it stands
+			client.walk_sent = null
+
+
+func _walk_want() -> void:
+	var t := Keys.tile(walk_pos)
+	var last = client.walk_sent if client.walk_sent != null else Keys.tile(Vector2(client.view["pos"][0], client.view["pos"][1]))
+	client.walk_want = t if t != last else null
+
+
+func _walk_lines(evs: Array) -> void:
+	## A line when a walk takes you into a place or out of one, and the reason when the engine refuses a step.
+	for e in evs:
+		if e.get("actor") == null or int(e["actor"]) != int(client.me["id"]):
+			continue
+		if e["kind"] == "moved" and e["data"].get("place") != walk_place:
+			walk_place = e["data"].get("place")
+			_append(ui["feed"], "[color=#8a93a6]%s[/color]  %s\n" % [Words.clock(int(e["tick"]), client.ticks_per_day()).split(", ")[1],
+					"You walk into %s." % Words.place(walk_place, client.me) if walk_place != null else "You step out into the open."])
+		elif e["kind"] in ["arrive", "activity"] and e["data"].get("place") != null:
+			walk_place = e["data"]["place"] if int(e["data"].get("arrive", e["tick"])) == int(e["tick"]) else null
+		elif e["kind"] == "receipt" and str(e["data"].get("action", "")) == "walk" and not e["data"].get("ok", false):
+			walking = false  # asleep, or bedtime: the engine has the body
+			client.walk_want = null
+			client.walk_sent = null
+
+
+func _e_key() -> void:
+	## E: what can be done here, with whoever stands nearest and at this place, picked with 1 to 9.
+	if not e_items.is_empty():
+		e_items = []
+		return
+	e_items = Keys.items(client.view, reach, names, _hearers().has(reach))
+
+
+func _e_pick(i: int) -> void:
+	if i < 0 or i >= e_items.size():
+		return
+	var it: Dictionary = e_items[i]
+	e_items = []
+	if it["action"] == "talk":
+		_talk_with(int(it["target"]))
+	else:
+		_choose(it["action"], int(it["target"]), "", it["label"])
+
+
+func _talk_with(t: int) -> void:
+	## The Talk box on this villager, ready to type.
+	if t >= 0 and _hearers().has(t):
+		talk.pick(t)
+		_talk_key = ""
+		_refresh_talk()
+	ui["talk_line"].grab_focus()
+
+
+func _input(ev: InputEvent) -> void:
+	# Esc leaves the Talk box, so the keys walk again (a focused box takes W, A, S and D as letters).
+	if ev is InputEventKey and ev.pressed and ev.keycode == KEY_ESCAPE and _typing():
+		get_viewport().gui_release_focus()
+		get_viewport().set_input_as_handled()
+
+
 func _unhandled_input(ev: InputEvent) -> void:
 	if ev is InputEventKey and ev.pressed and (ev.ctrl_pressed or ev.meta_pressed) \
 			and ev.keycode in [KEY_EQUAL, KEY_PLUS, KEY_KP_ADD, KEY_MINUS, KEY_KP_SUBTRACT, KEY_0]:
@@ -772,6 +894,23 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_layout()
 		get_viewport().set_input_as_handled()
 		return
+	if client != null and client.scope == "inhabitant" and ev is InputEventKey and ev.pressed and not ev.echo \
+			and not (ev.ctrl_pressed or ev.meta_pressed or ev.alt_pressed) and _can_walk():
+		var handled := true
+		if ev.physical_keycode == KEY_E:
+			_e_key()
+		elif ev.keycode == KEY_ESCAPE:
+			e_items = []
+		elif ev.physical_keycode == KEY_T or ev.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+			e_items = []
+			_talk_with(reach)
+		elif ev.keycode >= KEY_1 and ev.keycode <= KEY_9 and not e_items.is_empty():
+			_e_pick(ev.keycode - KEY_1)
+		else:
+			handled = false
+		if handled:
+			get_viewport().set_input_as_handled()
+			return
 	if client == null and ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
 		picked = ""  # recorded mode: a click picks the place under it, or nothing
 		for name in map_rects:
@@ -788,6 +927,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		return
 	if ev.button_index != MOUSE_BUTTON_LEFT:
 		return
+	get_viewport().gui_release_focus()  # a click on the map leaves the Talk box, so the keys walk again
+	e_items = []
 	for name in map_rects:
 		if map_rects[name].has_point(ev.position):
 			_choose("go_to", -1, name, "Go to " + Words.place(name, client.me))
@@ -929,6 +1070,7 @@ func _process(delta: float) -> void:
 		_refresh_picked()
 	if client and client.scope == "inhabitant" and ui.has("wait"):
 		ui["wait"].text = _wait_text()
+		_walk_keys(delta)
 	var newest := client.view_tick if client else model.last_tick + 1
 	var s: HSlider = ui["slider"]
 	s.max_value = newest
@@ -1029,7 +1171,7 @@ func _draw_inhabitant() -> void:
 	var k := k0 * zoom
 	var origin := Vector2(20, 20)
 	if zoom > 1.0:  # V4: the map follows you, centred in its column
-		var me_m := Vector2(client.view["pos"][0], client.view["pos"][1])
+		var me_m := _me_tiles()
 		origin = Vector2(map_w / 2.0, (size.y - 30) / 2.0) - (me_m - lo) * k
 		# Polish (aipt2: "the map is cropped at the left"): the camera stops at the village's edges, so near an
 		# edge the map's border shows whole instead of the column running past it into half-drawn houses.
@@ -1070,11 +1212,13 @@ func _draw_inhabitant() -> void:
 		if label != "":
 			tags.append([label, rect])
 	var v: Dictionary = client.view
-	var at := (Vector2(v["pos"][0], v["pos"][1]) - lo) * k + origin
+	var at := (_me_tiles() - lo) * k + origin
 	var px := maxf(k * 2.2, 12.0)
 	var here: Rect2 = map_rects.get(str(v.get("place")), Rect2(at - Vector2(px, px), Vector2(px, px) * 2)).grow(-2)
 	var seen := _map_view().grow(-px)
-	if here.intersects(seen):  # zoomed in, a big place runs off the column: spread the people over what shows
+	# Zoomed in, a big place runs off the column: spread the people over what shows. Not where the keys walk
+	# the body (walk-1): there each one keeps a steady spot in the place, so you can walk up to them.
+	if here.intersects(seen) and not _can_walk():
 		here = here.intersection(seen)
 	drawn_at = {}
 	# Polish (aipt2: "the villagers cluster so I can't tell who is who"): a crowd draws at most CROWD_MAX people,
@@ -1102,16 +1246,49 @@ func _draw_inhabitant() -> void:
 		if who != "":
 			tags.append([who, Rect2(drawn_at[talking] - Vector2(0, 4), Vector2.ZERO)])
 	Art.villager(self, at, str(client.me.get("role", "")), px, true, bool(v["asleep"]))
+	reach = Keys.nearest(drawn_at, int(client.me["id"]), at - Vector2(0, px * 0.85), px * 3.5) if _can_walk() and v.get("place") != null else -1
+	if reach >= 0:  # who E and T reach: a ring at their feet and their name
+		draw_arc(drawn_at[reach] + Vector2(0, px * 0.85), px * 0.55, 0.0, TAU, 28, Color(0.55, 0.9, 1.0, 0.95), 2.0)
+		if reach != talking:
+			tags.append([str(names.get(reach, "")), Rect2(drawn_at[reach] - Vector2(0, 4), Vector2.ZERO)])
 	drawn_at[int(client.me["id"])] = at - Vector2(0, px * 1.1)
 	var night := night_shade(fmod(client.display_tick(), float(client.ticks_per_day())) * 24.0 / client.ticks_per_day())
 	if night > 0.0:  # day and night (V-pass, left from #76): over the ground and people, under every word
 		draw_rect(_map_view(), Color(0.04, 0.06, 0.2, night))
 	_draw_tags(tags)
 	_draw_bubbles()
+	_draw_e_list()
 	# The map's column ends at map_w: cover what a zoomed map draws beyond it, under the panels, and its foot.
 	draw_rect(Rect2(map_w, 0, size.x - map_w, size.y), RenderingServer.get_default_clear_color())
 	draw_rect(Rect2(0, size.y - 30, map_w, 30), RenderingServer.get_default_clear_color())
-	Art.label(self, Vector2(12, size.y - 10), "Click a place to walk there; scroll to zoom.", 14, Color(0.75, 0.82, 0.95))
+	Art.label(self, Vector2(12, size.y - 10), "WASD: walk   E: do   T: talk   wheel: zoom"
+			if _can_walk() else "Click a place to walk there; scroll to zoom.", 14, Color(0.75, 0.82, 0.95))
+
+
+func _draw_e_list() -> void:
+	## The E list beside your body: what the server offers here, one key each.
+	if e_items.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	var fs := 15
+	var head := "With %s" % str(names.get(reach, "")) if reach >= 0 and int(e_items[0]["target"]) == reach else "Here"
+	var w := font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	for i in e_items.size():
+		w = maxf(w, font.get_string_size("%d  %s" % [i + 1, e_items[i]["label"]], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+	# Docked at the foot of the map's column, so it never covers you or whoever you're with.
+	var view := _map_view()
+	var box := Rect2(Vector2(6, 0), Vector2(minf(w + 20, map_w - 12.0), (e_items.size() + 1) * (fs + 6) + 10))
+	box.position.y = maxf(4.0, view.end.y - box.size.y - 4.0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.09, 0.13, 0.94)
+	sb.border_color = Color(0.55, 0.9, 1.0, 0.9)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(5)
+	draw_style_box(sb, box)
+	draw_string(font, box.position + Vector2(10, fs + 4), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.65, 0.75, 0.9))
+	for i in e_items.size():
+		draw_string(font, box.position + Vector2(10, (i + 2) * (fs + 6) + 2), "%d  %s" % [i + 1, e_items[i]["label"]],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 0.97, 0.88))
 
 
 static func night_shade(hour: float) -> float:

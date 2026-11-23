@@ -6,6 +6,7 @@ import os
 from asiimov import live
 from asiimov.minds import StubMind
 from asiimov.sim import TICKS_PER_DAY
+from asiimov.worldmap import bounds
 from test_inhabitant import intent
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +15,7 @@ rep = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rep)
 
 
-def session(out):
+def session(out, walks=False):
     """A stub world where an inhabitant says two lines to someone here and one to someone who isn't."""
     r = live.LiveRunner(out, StubMind(), 4, 20)
     while r.sim.state["tick"] < TICKS_PER_DAY // 2:
@@ -34,6 +35,11 @@ def session(out):
                         client="c1", scope="inhabitant") is None
         said.append(text)
         r.step()
+        r.step()
+    if walks:  # walk-1: a step out of the place and one off the map's edge, which the runner refuses
+        x0, y0, _, _ = bounds(r.sim.map)
+        assert r.submit(intent("w0", "act", {"action": "walk", "to": [x0, y0]}, r.sim.state["tick"]), client="c1", scope="inhabitant") is None
+        assert r.submit(intent("w1", "act", {"action": "walk", "to": [x0 - 1, y0]}, r.sim.state["tick"]), client="c1", scope="inhabitant") is not None
         r.step()
     r.leave("c1")
     r.step()
@@ -57,6 +63,16 @@ def test_rows_pair_each_line_with_its_reply_and_count_the_lost_ones(tmp_path):
     assert (m["says"], m["says_heard"], m["says_replied"], m["says_lost"]) == (3, 2, 2, {"target not here": 1})
     assert m["acts"] == 3 and m["acts_ok"] == 2 and m["line6"]["n"] == 3 and m["line7"]["n"] == 2
     assert m["replies_repeated"] == 1 and m["replies_third_person"] == 0
+
+
+def test_steps_are_counted_apart_from_acts_and_stay_out_of_line_6(tmp_path):
+    out, plain = str(tmp_path / "w"), str(tmp_path / "p")
+    session(out, walks=True)
+    session(plain)
+    m, m0 = rep.metrics(rep.rows(out)), rep.metrics(rep.rows(plain))
+    assert m["walks"] == {"sent": 1, "moved": 1} and m0["walks"] == {"sent": 0, "moved": 0}
+    assert (m["acts"], m["acts_by_kind"], m["line6"]["n"]) == (m0["acts"], m0["acts_by_kind"], m0["line6"]["n"])
+    assert "**Steps walked:** 1 sent, 1 moved the body." in rep.report(rep.rows(out), m, None, None)
 
 
 def test_a_held_reply_is_timed_from_when_it_went_out(tmp_path):

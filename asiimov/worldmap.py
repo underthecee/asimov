@@ -38,6 +38,49 @@ def build_map(homes: list[str]) -> dict:
     return {"tile_m": TILE_M, "walk": WALK, "places": out}
 
 
+def place_at(world_map: dict, pos) -> str | None:
+    """The place whose rectangle holds this tile, or None out in the open (walk-1). Where two rectangles
+    share a tile (a home lot beside the market does), the nearer anchor wins, then the lower name, so the
+    answer never depends on the order places were listed in."""
+    x, y = pos
+    best = None
+    for name, p in world_map["places"].items():
+        rx, ry, w, h = p["rect"]
+        if rx <= x < rx + w and ry <= y < ry + h:
+            key = (distance(pos, p["anchor"]), name)
+            if best is None or key < best:
+                best = key
+    return None if best is None else best[1]
+
+
+MARGIN = 4  # tiles of open ground around the places' rectangles that a body may stand on
+
+
+def bounds(world_map: dict) -> list[int]:
+    """[x0, y0, x1, y1], inclusive: the tiles a body may stand on, the places' bounding box plus MARGIN."""
+    rs = [p["rect"] for p in world_map["places"].values()]
+    return [min(r[0] for r in rs) - MARGIN, min(r[1] for r in rs) - MARGIN,
+            max(r[0] + r[2] for r in rs) - 1 + MARGIN, max(r[1] + r[3] for r in rs) - 1 + MARGIN]
+
+
+def on_map(world_map: dict, pos) -> bool:
+    """Whether `pos` is a tile a body may stand on: [x, y], whole numbers, within bounds()."""
+    if not (isinstance(pos, (list, tuple)) and len(pos) == 2 and all(type(v) is int for v in pos)):
+        return False
+    x0, y0, x1, y1 = bounds(world_map)
+    return x0 <= pos[0] <= x1 and y0 <= pos[1] <= y1
+
+
+def step_toward(frm, to, left: int) -> list[int]:
+    """Up to `left` tiles from `frm` toward `to` along the L path, x first, as position() walks it."""
+    (x, y), (tx, ty) = frm, to
+    dx = min(left, abs(tx - x))
+    x += dx if tx >= x else -dx
+    dy = min(left - dx, abs(ty - y))
+    y += dy if ty >= y else -dy
+    return [x, y]
+
+
 def distance(a, b) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 

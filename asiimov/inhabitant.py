@@ -7,7 +7,6 @@ the live runner calls it between ticks, and test_inhabitant checks the log still
 import json
 
 from .sim import ANSWER_ACTS, OCCASION_TICKS, PERSON_STEPS, TALK_WHY, TICKS_PER_DAY
-from .worldmap import position
 
 # The per-tick view's keys, as the spec lists them. A new field needs a spec line, and bar 5 checks this.
 VIEW_KEYS = ("tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan", "recent",
@@ -29,8 +28,7 @@ UNSEEN_WHY = ("target not here", "target asleep", "no coin")
 
 
 def _pos(sim, a) -> list[int]:
-    places, r = sim.map["places"], a["route"]
-    return list(places[a["place"]]["anchor"] if r is None else position(r, places[r["to"]]["anchor"], sim.state["tick"]))
+    return list(sim._pos(a))  # the engine's own: an anchor, a point on a walk, or the tile the player walked it to
 
 
 def present_ids(sim, aid: int) -> list[int]:
