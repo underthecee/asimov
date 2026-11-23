@@ -550,6 +550,8 @@ func _on_inhabit_tick(m: Dictionary) -> void:
 
 func _on_early(m: Dictionary) -> void:
 	## E4: the player's act applied mid-tick; its receipt is here now, not with the tick.
+	if m.has("view"):  # protocol 3: a walk's answer, with who is here now
+		_learn_names(m["view"])
 	if not _caught_up:
 		return  # the catch-up on the first tick reads seen_events, these included
 	_feed(m["events"])

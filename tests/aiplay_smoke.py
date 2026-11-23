@@ -31,7 +31,7 @@ def aiplay(*args) -> str:
 
 async def main(url: str, run_dir: str, work: str):
     send, recv, _ = await s16b._ws(url)
-    send({"type": "hello", "protocol": 2, "scope": "god", "since": 0})
+    send({"type": "hello", "protocol": 3, "scope": "god", "since": 0})
 
     async def step() -> dict:
         send({"type": "control", "op": "step"})

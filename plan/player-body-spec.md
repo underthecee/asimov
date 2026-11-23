@@ -170,8 +170,8 @@ is the dev/review tool until a game design says what divine power costs.
   someone is offered. Every rule that asks where a villager is (`Sim._pos`, occupancy, the offer, the view)
   reads the same tile, so a later rule about things on tiles has the body's tile to check.
 - A walk is applied when it is recorded, at the start of its tick or late at the fixed point, and is not the
-  tick's one act. It moves at most `WALK` tiles a tick over all the walks of that tick
-  (`state.player.walk = [tick, used]`), x first, the same path and speed as a villager's route.
+  tick's one act. It moves at most `WALK` tiles a tick over all the walks of that tick, x first, the same path
+  and speed as a villager's route. (time-1a, below: recorded as it arrives, and bounded over sim-time.)
 - Each walk emits `moved {from, pos, place}` (origin rule, parent: the act). A sleeper's walk, or one at or
   after bedtime, is a failed receipt ("asleep", "bedtime"); the engine walks the body home at bedtime as it
   does every villager.
@@ -179,9 +179,8 @@ is the dev/review tool until a game design says what divine power costs.
   the day's plan takes over; any other act replaces the stand, and `go_to`, `seek` and a gift set out from the
   tile. A walk stops a route where the body is. A seeker bound for a body in the open waits where it is.
 - Walking out of a place settles the asks held there as declined (`_settle_ask`), before the asker's wait ends.
-- The live runner pulls a tick for a walk only when its tile is in another place than the body's (or in the
-  open from a place, or the reverse): steps inside one place ride the next tick, so holding a key doesn't
-  drive the world's clock. The client draws its own body between ticks at the engine's speed and takes the
+- The live runner pulled a tick for a walk only when its tile was in another place than the body's; since
+  time-1a no walk pulls one (below). The client draws its own body between ticks at the engine's speed and takes the
   engine's tile when the keys are up and every walk is acked; it predicts nothing else.
 - This replaces the `walk {place}` idea under "What would change this": a tile, not a place.
 
@@ -202,6 +201,32 @@ is the dev/review tool until a game design says what divine power costs.
 - A walk sets out from the tile the body stands on (its slot, until it has walked), not from the anchor.
 - The client draws every body from these fields. `world_model.gd` mirrors `slot` and `position`, and
   `tests/test_positions.gd` holds it to the engine at every tick boundary and at times inside a tick.
+
+## Time inside the tick (time-1a, plan/v0-contracts-spec.md B2.1 and B2.2)
+- Every player act may carry `f`, its time inside its tick in 600ths (`sim.SUB`, sim-seconds): t = tick + f/600.
+  Only the live runner sets it, from the hub's clock: the real time since the last tick started over the pace,
+  below 1; 599 for an act that joins a running tick, whose sim-time stands still while it computes; 0 in a
+  paused world (Steering 2026-11-23 19:03Z). The `act` event records `f` when it isn't 0, and batch and replay
+  use the recorded value. Acts apply in order of t: the engine refuses an `f` earlier than the act before it,
+  and the runner never stamps one.
+- A walk is bounded by walking speed over sim-time, in place of walk-1's allowance per tick. The body earns
+  `WALK` tiles a tick as time passes, keeps at most one tick's walking while it stands (which a body that
+  hasn't walked has), and a walk spends a tile for a tile: `state.player.walk = [the last walk's t in 600ths,
+  what it kept, in 600ths of a tile]`. A walk is clamped toward `to`, never refused for asking too far. Over
+  any stretch the body moves at most `WALK` tiles a tick plus what it had kept, and from a walk that was cut
+  short it is never a whole tile ahead of walking speed (tests/test_time.py). This is B2.2's bound with the
+  kept walking capped at `WALK` tiles in all, so walks stamped on whole ticks move exactly as walk-1's did.
+- `Sim.take(action)` records a player action the moment it arrives between ticks, and a walk moves the body
+  then. It is the first loop of `Sim.step` run early: the step skips what was taken (its list must begin with
+  those actions), so batch, replay and resume, which hand the step the whole list, write the same events. A log
+  may end on actions taken ahead of a tick that never ran; replay takes them the same way.
+- The live runner takes every scheduled action as it arrives (`LiveRunner.take_due`), in slot order. A walk is
+  acked then, with its `moved` event and the inhabitant's new view (protocol 3); other acts are recorded then
+  and resolved in their tick. No walk pulls a tick: Review's two notes on #110 (a pull judged by the place of
+  `to`, and a wiggle across an edge pulling a tick per key) are gone with the pull. No snapshot is written
+  over actions taken ahead of their tick.
+- Still on the tick: every other act's outcome (time-1b lands the small ones at their t), minds, needs, the
+  economy, villagers' arrivals. A world with no player writes engine 38's log (the no-player bar).
 
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical

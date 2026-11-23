@@ -52,8 +52,8 @@ class Run:
 
     def finish(self):
         """Snapshot the final state, append the end event and close the log."""
-        if not os.path.exists(self._snap_path(self.sim.state["tick"])):
-            self._snapshot()
+        if not os.path.exists(self._snap_path(self.sim.state["tick"])) and len(self.sim.events) == self.hashed:
+            self._snapshot()  # never over actions taken ahead of their tick (Sim.take): the log doesn't hold them yet
         self.sim.finish()
         self._append()
         os.fsync(self.log.fileno())
@@ -143,7 +143,9 @@ def resume(out: str, mind, workers: int = 1, snapshot_every: int = TICKS_PER_DAY
     snap, n = _newest_valid_snapshot(out, lines)
     events = [Event(**json.loads(l)) for l in lines]
     if events and events[-1].kind == "end":
-        events.pop()  # extending a finished world: the end moves to the new last tick
+        end = events.pop()  # extending a finished world: the end moves to the new last tick
+        while len(events) > n and events[-1].tick == end.tick:
+            events.pop()  # actions taken ahead of a tick that never ran (Sim.take): run.json holds them, it runs them
     elif len(events) > n:
         # A kill mid-write can leave the last recorded tick partial, so it is dropped and re-run live.
         last = events[-1].tick

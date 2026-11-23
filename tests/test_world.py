@@ -222,7 +222,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "walk-1": "3296b5cca558495ecec9ebbb5c0f8b8a8b37f6d1e3537733d147c67721f6adf4",  # walk-1: the player walks its body tile by tile, on 38, before its number; no walk: only the engine field differs
           "39": "80e0303b704a8d019f0edb3d4d73cbd50c8a3acc8accf66b6184b02dbace189d",  # walk-1 (#110), the player walks its body tile by tile; no walk: only the engine field differs
           "space-1": "1340d94ae575ea820a10f09c87b75fb2911943dc7d3ea6aafa7963c2677559a6",  # space-1: every body stands on a tile the engine derives, on 39, before its number; no player: only the engine field differs
-          "40": "ea0ed1b403edf9ba0618e822da4fa0e45507b487c5b73e81d4cb187824aef984"}  # space-1 (#112), every body stands on a tile the engine derives; no player: only the engine field differs
+          "40": "ea0ed1b403edf9ba0618e822da4fa0e45507b487c5b73e81d4cb187824aef984",  # space-1 (#112), every body stands on a tile the engine derives; no player: only the engine field differs
+          "time-1a": "8ec013166d9fc8ecc96ff275acdfe859929be833f479c808d74cfb76d50457ba"}  # time-1a: an act carries its time inside the tick and a walk is bounded by it, on space-1, before its number; no player: only the engine field differs
 
 
 def test_log_changes_bump_the_engine_version():

@@ -1,10 +1,10 @@
-# Protocol 2 client (plan/client-protocol.md): hello, then welcome, backlog and ticks.
+# Protocol 3 client (plan/client-protocol.md): hello, then welcome, backlog and ticks.
 # God scope rebuilds every villager into a WorldModel. Inhabitant scope (agent >= 0) keeps only what the
 # server sends its villager: the latest whitelisted view and the events it witnessed. Its action menu is the
 # server's offer, never computed here. Sends intents and controls only; never state.
 extends RefCounted
 
-const PROTOCOL := 2
+const PROTOCOL := 3
 const WorldModel := preload("res://scripts/world_model.gd")
 
 signal welcomed(msg: Dictionary)
@@ -105,6 +105,8 @@ func _handle(text: String) -> void:
 		"early":
 			for e in m["events"]:
 				_add(e)
+			if m.has("view") and scope == "inhabitant":
+				view = m["view"]  # protocol 3: a walk's answer carries where the body now stands and who is there
 			early.emit(m)
 		"tick":
 			for e in m["events"]:
@@ -173,8 +175,9 @@ func act(action: String, target: int = -1, place: String = "", text: String = ""
 
 
 func walk(tile: Vector2i) -> String:
-	## Inhabitant scope, walk-1: step the body toward `tile`. The engine moves it at most `walk` tiles a tick
-	## and answers with a `moved` event carrying where it stands and which place that is. Not the tick's one act.
+	## Inhabitant scope, walk-1: step the body toward `tile`. The engine moves it as far as walking speed allows
+	## since its last walk (time-1a), the moment the walk arrives, and answers at once with a `moved` event
+	## carrying where it stands and which place that is, and with its new view. Not the tick's one act.
 	_seq += 1
 	var id := "w%x%x-%d" % [Time.get_ticks_usec(), randi(), _seq]
 	walk_sent = tile

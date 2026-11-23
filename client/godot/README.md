@@ -1,7 +1,7 @@
 # asiimov Godot client
 
 2026-11-09. Block B10, Track A, PR 2. Godot 4.3-stable, GDScript only. The client draws and sends intents.
-The Python engine is the only source of truth, over protocol 2 (`plan/client-protocol.md`).
+The Python engine is the only source of truth, over protocol 3 (`plan/client-protocol.md`).
 
     python -m asiimov.live --out runs/live --agents 25 --tps 2        # the live world
     godot --path client/godot -- --url ws://127.0.0.1:8765/           # live client
@@ -12,9 +12,10 @@ The Python engine is the only source of truth, over protocol 2 (`plan/client-pro
 
 - `scripts/world_model.gd` rebuilds who is where from events alone. The engine moves villagers only in
   `activity`, `arrive` and (a player's walked step, walk-1) `moved` events, and positions mirror the engine's (space-1): a villager at a place stands on its slot there (`slot`, worldmap.slot's arithmetic), a walker where worldmap.position puts it, at a tick boundary (`position`) or at a time inside a tick (`pos_at`). `test_positions.gd` holds both to the engine. The lerp between boundaries in a recorded world is for drawing only.
-- `scripts/live_client.gd` speaks protocol 2: in god scope hello, backlog, ticks, acks, `fire` and controls; in inhabitant scope (`--inhabit N`) its villager's view, witnessed events and `act`. The action menu is the server's `offer`, one button per action (and person it may name), never computed in GDScript.
+- `scripts/live_client.gd` speaks protocol 3: in god scope hello, backlog, ticks, acks, `fire` and controls; in inhabitant scope (`--inhabit N`) its villager's view, witnessed events and `act`. The action menu is the server's `offer`, one button per action (and person it may name), never computed in GDScript.
 - `scripts/inhabit_ui.gd` puts an inhabitant's stream into words: what happened (each witnessed event and each receipt as a sentence), its status, today's plan, who is here and what they were last seen doing, and a label for each button. After a press every button waits for the next tick, and buttons the engine can only refuse are left off: asks and theft need the person here, and "ask family" appears only for family who are here (seek, avoid and gifts work from anywhere; a gift walks there first). It reads what the server sent and decides nothing.
 - `scripts/walk_keys.gd` (walk-1) holds the keys' arithmetic and nothing else: how far a held key moves the drawn body (the engine's `walk` tiles a tick at the world's pace, capped at 12 tiles a second), which drawn villager is in reach, and the E list, which is the server's `offer` for where the body stands with Talk first. WASD or the arrows walk, E opens the list and 1 to 9 pick from it, T or Enter starts a line to the villager in reach, Esc leaves a box. The body is drawn ahead of the engine between ticks; the tile it reached is sent as a `walk` act at most once a second, on key release and before any other act, and the engine's `moved` answer is what counts.
+- time-1a (protocol 3): a walk is answered the moment it arrives, between ticks too, with an `early` message carrying its `moved` event and the body's new view, which `live_client.gd` takes as the view. The engine bounds a walk by walking speed over sim-time, so the body on screen and the engine's tile stay together while a key is held.
 - `tests/test_walk.gd` (walk-1): the keys' arithmetic, a walked body in the world model, and a live walk out into the open and into the market, with a step and an act in one tick. Needs a paused live world stepped to a waking hour (`python scripts/s16b.py op URL "" step --until 60`).
 - `tests/test_inhabit.gd` (bar 6): inhabits a villager while a god client steps the world, presses menu buttons and checks every applied act's receipt arrives in its own stream.
 - `scripts/main.gd` draws the map from genesis, villagers colored by activity, a timeline with a scrubber,

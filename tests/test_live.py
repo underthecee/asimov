@@ -260,9 +260,9 @@ def test_websocket_session_hello_backlog_ticks_acks_and_reattach(tmp_path):
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "god"})
+        c.send({"type": "hello", "protocol": 3, "scope": "god"})
         w = await c.recv()
-        assert (w["type"], w["protocol"], w["view_tick"], w["paused"]) == ("welcome", 2, 30, True)
+        assert (w["type"], w["protocol"], w["view_tick"], w["paused"]) == ("welcome", 3, 30, True)
         assert w["engine"] == runner.sim.events[0].data["engine"] and w["world"]["map"] == runner.sim.map
         got = []
         while len(got) < w["n_events"]:
@@ -299,7 +299,7 @@ def test_websocket_session_hello_backlog_ticks_acks_and_reattach(tmp_path):
 
         since = len(runner.sim.events) // 2  # paused, so the log is still
         d = await WS.connect(port)            # reattach mid-world: the gap, then live ticks, nothing twice
-        d.send({"type": "hello", "protocol": 2, "since": since})
+        d.send({"type": "hello", "protocol": 3, "since": since})
         w2 = await d.recv()
         back = []
         while len(back) < w2["n_events"] - since:
@@ -310,13 +310,13 @@ def test_websocket_session_hello_backlog_ticks_acks_and_reattach(tmp_path):
         assert [e["id"] for e in back + t2["events"]] == list(range(since, len(runner.sim.events)))
 
         e = await WS.connect(port)
-        e.send({"type": "hello", "protocol": 2, "scope": "watcher"})
+        e.send({"type": "hello", "protocol": 3, "scope": "watcher"})
         assert (await e.recv())["reason"] == "bad_scope" and await e.recv() is None
         f = await WS.connect(port)
-        f.raw(1, b'{"type": "hello", "protocol": 2}', masked=False)  # clients must mask
+        f.raw(1, b'{"type": "hello", "protocol": 3}', masked=False)  # clients must mask
         assert (await f.recv())["reason"].startswith("bad_frame") and await f.recv() is None
         g = await WS.connect(port)
-        g.send({"type": "hello", "protocol": 1})  # protocol 2 replaced 1
+        g.send({"type": "hello", "protocol": 2})  # protocol 3 replaced 2 (time-1a), as 2 replaced 1
         assert (await g.recv())["reason"] == "unknown_protocol"
         h = await WS.connect(port)
         h.send({"type": "hello", "protocol": True})
@@ -342,10 +342,10 @@ def test_a_token_guards_the_hello_and_each_tick_records_its_wall_time(tmp_path):
         port = await ready
         for bad in ({}, {"token": "nope"}, {"token": ["s3cret"]}):
             c = await WS.connect(port)
-            c.send({"type": "hello", "protocol": 2, **bad})
+            c.send({"type": "hello", "protocol": 3, **bad})
             assert (await c.recv())["reason"] == "bad_token" and await c.recv() is None
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "token": "s3cret"})
+        c.send({"type": "hello", "protocol": 3, "token": "s3cret"})
         assert (await c.recv())["type"] == "welcome"
         c.send({"type": "control", "op": "step"})
         await c.until("tick")
@@ -372,13 +372,13 @@ def test_only_time_steps_a_running_world_and_a_speed_change_takes_the_next_tick(
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "run"})
         assert (await god.until("tick"))["tick"] == 0  # run steps at once, then every 100 s
         for i in range(4):  # hellos, intents, a pause-free control and a disconnect must not step it
             c = await WS.connect(port)
-            c.send({"type": "hello", "protocol": 2})
+            c.send({"type": "hello", "protocol": 3})
             await c.until("welcome")
             c.send({"type": "intent", "id": f"p{i}", "verb": "possess", "args": {"agent": i}, "seen_tick": 1})
             await asyncio.sleep(0.05)  # its ack waits for the tick that applies it

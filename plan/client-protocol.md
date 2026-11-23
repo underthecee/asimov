@@ -1,7 +1,8 @@
 # Client protocol
 
-2026-11-09. Status: protocol 2 (B10; protocol 1 was PR 1, protocol 2 adds the inhabitant scope of
-plan/player-body-spec.md). Implemented by `asiimov/live.py` and `asiimov/inhabitant.py`.
+2026-11-09. Status: protocol 3 (B10; protocol 1 was PR 1, protocol 2 adds the inhabitant scope of
+plan/player-body-spec.md, protocol 3 is time-1a: a walk is applied and answered the moment it arrives, and its
+`early` message carries the body's new view). Implemented by `asiimov/live.py` and `asiimov/inhabitant.py`.
 Specs: plan/2d-env-eval.md and plan/client-form-factor.md in the shared folder.
 
 The engine is the only source of truth. A client renders what the engine sends and sends intents.
@@ -12,7 +13,7 @@ WebSocket (RFC 6455), text frames, one JSON object per frame, UTF-8. Default `ws
 A frame over 1 MiB from a client closes the connection. Server frames can be larger (a backlog chunk
 with long mind outputs), so a client raises its inbound buffer (Godot: `inbound_buffer_size`).
 
-Every server message carries `"protocol": 2` and `"engine": "<ENGINE_VERSION>"`. A client that sees a
+Every server message carries `"protocol": 3` and `"engine": "<ENGINE_VERSION>"`. A client that sees a
 protocol it doesn't know disconnects. A new engine version needs no protocol change unless a message
 changes shape; new event kinds can appear in any engine, and a client ignores kinds it doesn't draw.
 
@@ -30,7 +31,7 @@ The first message names a scope. The scope decides what the server sends; it is 
 | `inhabitant` | only what its villager perceives (below). Never another villager's soul, traits, params or mind output, nor its own villager's numbers. |
 
 ### The inhabitant scope
-`hello` names the body: `{"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": 4, "since": 0}`.
+`hello` names the body: `{"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": 4, "since": 0}`.
 The runner possesses it for the inhabitant (a `possess` player event at the next tick). One body is held
 at a time in a world: a hello while any body is held gets the error `body_taken`, and an `agent` that
 isn't a villager's id gets `bad_agent`. When the inhabitant disconnects, the runner records `release`
@@ -86,7 +87,7 @@ costs.
 
 `hello` must be the first message:
 ```json
-{"type": "hello", "protocol": 2, "scope": "god", "since": 0}
+{"type": "hello", "protocol": 3, "scope": "god", "since": 0}
 ```
 `since` is the first event id the client still needs (default 0). A reattaching client passes the id
 after the last event it has; the server sends the gap as backlog and then live ticks, with no event
@@ -110,7 +111,9 @@ sent twice and none skipped.
     ack names the `act` event, not the receipt. An act followed in the same tick by `release`, or by a
     `possess` of another body, gets a `"released"` receipt and never resolves.
   - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
-    x first, at most `map.walk` tiles a tick over all its walks that tick. `to` goes with `walk` alone, takes no
+    x first, as far as walking speed allows since its last walk: it earns `map.walk` tiles a tick as sim-time
+    passes and keeps at most one tick's walking while it stands (time-1a). A walk that asks for more is cut
+    short, not refused. `to` goes with `walk` alone, takes no
     target or place, and must be a tile inside `verbs.act.to` (`[x0, y0, x1, y1]`, inclusive: the places' bounding
     box plus a margin); anything else is refused before it is logged. A walk is not the tick's one act: a walk
     and an act may share a tick, and the act is judged where the body then stands. The engine answers with a
@@ -119,6 +122,13 @@ sent twice and none skipped.
     with nobody. A sleeper's walk, or one at bedtime, gets a failed `receipt` instead ("asleep", "bedtime").
     The body stands where it stopped for a step's time (`DEFAULT_STEP_TICKS`), then its day takes over, as after
     any act. Walking out of a place answers an ask held there as declined.
+    **A walk is applied the moment it arrives (time-1a)**, between ticks or at a running tick's fixed point, and
+    never pulls a tick forward: its `early` message and `ack` come at once (see `early`).
+  - **The time inside the tick (time-1a).** The runner stamps every `act` with `f`, how far into its tick it
+    arrived in 600ths of a tick (sim-seconds): the real time since the last tick started over the pace, below
+    1; 599 for an act that joins a running tick; 0 in a paused world. An act's sim-time is `tick + f/600`. A
+    client never sends `f` (it is `bad_args`); the `act` event records it when it isn't 0, and batch and
+    replay use the recorded value. Acts in a tick apply in order of `f`, then of arrival.
 
 `control` (god scope only): `{"type": "control", "op": "pause" | "run" | "step" | "speed", "tps": 2.0}`.
 `step` runs one tick while paused; `speed` takes `tps` between 0.01 (100 s a tick, for a person playing) and 1000.
@@ -127,7 +137,7 @@ sent twice and none skipped.
 
 `welcome`, once, answering `hello`:
 ```json
-{"type": "welcome", "protocol": 2, "engine": "16", "scope": "god",
+{"type": "welcome", "protocol": 3, "engine": "16", "scope": "god",
  "world": {"seed": 1, "order": "id", "map": {...}, "population": {...}, "ticks_per_day": 144},
  "view_tick": 211, "n_events": 6012, "paused": false, "tps": 1.0, "verbs": {"fire": {"family": [0, 24]}}}
 ```
@@ -163,6 +173,11 @@ mid-tick, its receipt among them, then its `ack`. That tick's `tick` message lea
 `{"type": "early", "tick": 211, "events": [...]}`. An `act` that arrives while a tick runs joins that tick
 (its `act` event carries `"late": true`), unless the body's own mind is being asked (the idle hand-back),
 when it waits for the next tick and is acked as usual.
+Protocol 3 (time-1a): a `walk` gets its `early` and `ack` the moment it arrives, between ticks too, with
+`"view"`, the inhabitant's whole view from where the body now stands (who is present and in sight there), in
+the shape a `tick` message's view has: `{"type": "early", "tick": 212, "events": [act, moved], "view": {...}}`.
+`tick` is the tick the events belong to, which between ticks is the one that hasn't run yet. Every other act
+arriving between ticks is recorded at once and resolved in its tick, as before.
 
 `heard`, to an inhabitant only, when the runner narrates (readable-world E2; `--narrate`): the spoken words of
 something it just witnessed, sent after the tick, so it can arrive after the next `tick` message:
@@ -208,5 +223,7 @@ A client whose `since` is past the reopened log gets `bad_since` and reloads wit
 player action applies at its tick's fixed point (E4): after the agent loop has built the minds' requests,
 before any mind reply applies, those scheduled before the tick first, then late ones in `received` order.
 Nothing it reads is a mind reply of that tick, so its event id and outcome survive the re-run and its
-ack stands, the early one included (tests/test_late_act.py kills a tick after an early ack). With a live LLM mind, the rest of a re-run tick can differ from what was
+ack stands, the early one included (tests/test_late_act.py kills a tick after an early ack). A walk taken between
+ticks (time-1a) depends only on the state at the tick's start and the actions before it, which `run.json` holds
+before its ack, so it re-runs to the same event too (tests/test_time.py). With a live LLM mind, the rest of a re-run tick can differ from what was
 streamed before the crash.
