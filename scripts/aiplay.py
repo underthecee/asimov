@@ -1,7 +1,7 @@
 """AI playtest: the real Godot client on a virtual screen, played through synthetic mouse and keyboard.
 
 An agent that can read images plays the game a person plays: it looks at screenshots and clicks, scrolls and
-types. Nothing here talks to the world; the client does, over protocol 2, as it does for a person. So what
+types. Nothing here talks to the world; the client does, over protocol 3, as it does for a person. So what
 the agent can and can't see or do is the client's own UI (plan/ai-playtest.md).
 
     python scripts/aiplay.py start DIR --url wss://POD-8765.proxy.runpod.net/ --inhabit 29 --token T

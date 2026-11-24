@@ -33,6 +33,7 @@ from .rng import Rng
 from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, travel_ticks
 
 TICKS_PER_DAY = 144
+SUB = 600  # time-1a (B2.1): an act's time inside its tick, f, counts 600ths of a tick, which are sim-seconds
 VILLAGE_WAKE_MIN = 390  # 06:30
 FOOD_PRICE = 3
 FARMER_SELL_PRICE = 2
@@ -308,7 +309,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "40"  # 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "41"  # 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -480,6 +481,7 @@ class Sim:
         self.workers = workers  # concurrent mind calls per tick; never changes the log
         self.pending: dict[int, tuple] = {}  # agent id -> (request, parents, prompt tokens, apply)
         self.player_pending: dict[int, tuple] = {}  # agent id -> a player act to apply in _commit (no mind call)
+        self._own_tiles: dict[str, list] = {}  # place -> its own tiles, filled as bodies stand there (derived from the map)
         self.decides: dict[int, tuple] = {}  # text-1: listener id -> (request, parents, prompt tokens, data, apply)
         self._fut: dict[int, Future] = {}  # pace-2: agent id -> its in-flight call's reply (state["inflight"] holds the rest)
         self._bg: ThreadPoolExecutor | None = None
@@ -487,6 +489,9 @@ class Sim:
         self._branch: dict[int, str] = {}  # this tick: why a body takes no act (asleep, falling asleep, bedtime)
         self._acted: set = set()  # this tick: bodies whose one act is taken
         self._occupancy: dict = {}  # this tick's arrivals by place, for a late act's view (E4)
+        self._window = None  # time-1a: the tick whose scratch above is open for player actions (see _begin)
+        self._taken: list = []  # the tick's player actions applied before its step ran (take)
+        self._f = 0  # the latest f among the tick's player acts: they apply in order of t (B2.1)
         self.expected = expected
         self.events: list[Event] = []
         self.metrics = {"activity": defaultdict(lambda: defaultdict(int))}
@@ -944,6 +949,26 @@ class Sim:
         while self.state["tick"] < end_tick:
             self.step(player_events.get(self.state["tick"], []))
 
+    def _begin(self):
+        """Open the tick's window for player actions, once: its scratch starts empty. step() opens it, or the
+        first take() before it."""
+        if self._window != self.state["tick"]:
+            self._window, self._taken, self._f = self.state["tick"], [], 0
+            self._acts, self._branch, self._acted = {}, {}, set()
+
+    def take(self, act: dict) -> int:
+        """time-1a (B2.2): a player action that arrives between ticks is recorded the moment it arrives, and a
+        walk moves the body then, instead of at the start of the tick's step. This is step()'s own first loop
+        run early, in the same order: step() skips what was taken, so the actions must head its list as they
+        were given here, and a batch run, a replay or a resume that hands step() the same list makes the same
+        events. Any other act is recorded now and resolved in the step, as before. Returns the action's event."""
+        if act.get("late"):
+            raise ValueError("take: a late act joins a running tick (late_act); it isn't taken before one")
+        self._begin()
+        eid = self._player(act)
+        self._taken.append(json.loads(json.dumps(act)))
+        return eid
+
     def step(self, player_actions=(), during=None):
         """One tick. A player act marked `late` (E4) arrived while the tick ran: it applies at the tick's
         fixed point, after the agent loop has built the minds' requests and before any mind reply applies,
@@ -953,13 +978,18 @@ class Sim:
         st = self.state
         tick = st["tick"]
         agents = st["agents"]
-        self._acts, self._branch, self._acted = {}, {}, set()
-        late = []
+        self._begin()
+        late, ahead = [], list(self._taken)
         for act in player_actions:
             if act.get("late"):
                 late.append(act)
+            elif ahead:  # time-1a: applied when it arrived (take); a batch run, a replay or a resume applies it here
+                if act != ahead.pop(0):
+                    raise ValueError(f"step: tick {tick}'s actions must begin with the ones already taken")
             else:
                 self._player(act)
+        if ahead:
+            raise ValueError(f"step: {len(ahead)} of tick {tick}'s actions were taken and are missing from its list")
         for q in list(self.state.get("player", {}).get("asks", [])):
             if tick >= q["until"]:  # unanswered for an hour: declined by an active player (talk-1, design §2.4);
                 # an idle body's own nature answers, as for anyone
@@ -1075,10 +1105,9 @@ class Sim:
                             self.state["tick"] if t is None else t)
         if "at" in a:
             return list(a["at"])
-        tiles = self.__dict__.setdefault("_own_tiles", {})
-        if a["place"] not in tiles:
-            tiles[a["place"]] = own_tiles(self.map, a["place"])
-        return slot(tiles[a["place"]], a["id"])
+        if a["place"] not in self._own_tiles:
+            self._own_tiles[a["place"]] = own_tiles(self.map, a["place"])
+        return slot(self._own_tiles[a["place"]], a["id"])
 
     def tile(self, a: dict, t=None) -> list[int]:
         """The tile the body stands on at `t`: the floor of each coordinate of pos()."""
@@ -2785,24 +2814,33 @@ class Sim:
         return self._receipt(a, eid, "go_to", True, "already here" if here else "heading there",
                              extra={"place": place, "arrive": arrive})
 
-    def _walk(self, a: dict, eid: int, to: list, late: bool):
-        """walk-1: the player's body steps toward tile `to`, x first and then y as every walker does, at most
-        WALK tiles in a tick over all its walks that tick. The engine holds the tile it stands on (a["at"]) and
-        says which place that is: the one whose rectangle holds the tile, or none in the open, where it is
-        with nobody, as a walker is. It stands there for a step's time, as go_to's body does, unless another
-        act or walk replaces that. A walk scheduled before the tick is taken before anyone looks around; a late
-        one (E4) at the tick's fixed point, after this tick's prompts were built, so villagers notice it next
-        tick. The outcome is a `moved` event citing the act, or a failed receipt for a sleeper or at bedtime."""
+    def _walk(self, a: dict, eid: int, to: list, late: bool, f: int = 0):
+        """walk-1: the player's body steps toward tile `to`, x first and then y as every walker does. The engine
+        holds the tile it stands on (a["at"]) and says which place that is: the one whose rectangle holds the
+        tile, or none in the open, where it is with nobody, as a walker is. It stands there for a step's time,
+        as go_to's body does, unless another act or walk replaces that. A walk scheduled before the tick is
+        taken before anyone looks around; a late one (E4) at the tick's fixed point, after this tick's prompts
+        were built, so villagers notice it next tick. The outcome is a `moved` event citing the act, or a failed
+        receipt for a sleeper or at bedtime.
+
+        time-1a (B2.2): how far is bounded by walking speed over sim-time, not by a tick's allowance. The body
+        earns WALK tiles a tick as time passes (the act's t = tick + f/SUB), keeps at most one tick's walking
+        while it stands (WALK tiles, which a body that hasn't walked yet has), and a walk spends a tile for a
+        tile. It is clamped toward `to` and never refused for asking too far, so over any stretch it moves at
+        most WALK tiles a tick plus what it had kept. p["walk"] = [the last walk's t in SUBths, what it kept
+        after it, in SUBths of a tile]. Walks stamped on whole ticks move exactly as walk-1's did."""
         tick, p = self.state["tick"], self.state["player"]
         if a["asleep"]:
             return self._receipt(a, eid, "walk", False, "asleep")
         if tick >= a["sleep_tick"] or a["needs"]["fatigue"] >= 1000:
             return self._receipt(a, eid, "walk", False, "bedtime")  # the world walks it home, as for any act
-        used = p["walk"][1] if p.get("walk", [None])[0] == tick else 0
+        now = tick * SUB + f
+        then, kept = p.get("walk", [now, WALK * SUB])
+        kept = min(kept + WALK * (now - then), WALK * SUB)
         frm = self.tile(a)  # space-1: its first step sets out from where it stands in the place, not the anchor
-        pos = step_toward(frm, to, WALK - used)
+        pos = step_toward(frm, to, kept // SUB)
         was, place = a["place"], place_at(self.map, pos)
-        p["walk"] = [tick, used + abs(pos[0] - frm[0]) + abs(pos[1] - frm[1])]
+        p["walk"] = [now, kept - SUB * (abs(pos[0] - frm[0]) + abs(pos[1] - frm[1]))]
         a["place"], a["route"], a["at"], a["activity"] = place, None, pos, "visit"
         a["override"] = {"do": "roam", "target": None, "event": eid, "left": DEFAULT_STEP_TICKS}
         mid = self._emit("moved", "rule", a["id"], {"from": frm, "pos": pos, "place": place}, [eid])
@@ -2854,6 +2892,11 @@ class Sim:
             if (action in WALK_ACTS) != (to is not None) or action in WALK_ACTS and not (
                     target is None and on_map(self.map, to)):
                 raise ValueError(f"act: walk takes a tile on the map, [x, y], and only walk does ({action!r}, {to!r})")
+            f = act.get("f", 0)  # time-1a (B2.1): its time inside the tick, t = tick + f/SUB; the runner's stamp
+            if not (_is_int(f) and 0 <= f < SUB) or f < self._f:
+                raise ValueError(f"act: f is a whole number of {SUB}ths of the tick, from 0 to {SUB - 1}, and never "
+                                 f"earlier than the act before it ({f!r} after {self._f})")
+            self._f = f
             aid = self.state["player"]["agent"]
             data = {"action": action} if target is None else {"action": action, "target": target}
             if to is not None:
@@ -2866,12 +2909,14 @@ class Sim:
                 data["move"] = move
                 if price is not None:
                     data["price"] = price
+            if f:
+                data["f"] = f  # recorded, so batch and replay use it; left out at 0 (a paused world, a batch act)
             if late:
                 data["late"] = True  # it arrived mid-tick and applied at the fixed point (E4); replay keeps it there
             eid = self._emit("act", "player", aid, data, [self.state["player"]["event"]])
             self.state["player"]["order"] = self.state["tick"]
             if action in WALK_ACTS:  # walk-1: a step is taken as it's recorded, and isn't the tick's one act
-                self._walk(self.state["agents"][aid], eid, to, late)
+                self._walk(self.state["agents"][aid], eid, to, late, f)
                 return eid
             self._acts.setdefault(aid, []).append((eid, action, target))
             return eid

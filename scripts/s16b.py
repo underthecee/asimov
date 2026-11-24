@@ -4,7 +4,7 @@
     python scripts/s16b.py met RUN_DIR             # everyone at the possessed villager's place while it was held
     python scripts/s16b.py latency RUN_DIR         # act received->applied and tick wall times, p50/p95
 
-`op` speaks protocol 2 in god scope with the session token, sends one control (with --until it steps or
+`op` speaks protocol 3 in god scope with the session token, sends one control (with --until it steps or
 runs until the view reaches that tick, then pauses) and exits. `met` (the rating form) re-runs the log with its recorded mind
 replies, so it reads the engine's own occupancy, never the client's.
 """
@@ -63,7 +63,7 @@ async def _ws(url: str):
 
 async def op(args):
     send, recv, w = await _ws(args.url)
-    send({"type": "hello", "protocol": 2, "scope": "god", "token": args.token, "since": 0})
+    send({"type": "hello", "protocol": 3, "scope": "god", "token": args.token, "since": 0})
     m = await recv()
     if m is None or m["type"] == "error":
         raise SystemExit(f"refused: {m}")

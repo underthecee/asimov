@@ -111,10 +111,10 @@ def test_an_inhabitant_hears_words_and_the_world_log_is_unchanged(tmp_path):
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": aid})
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": aid})
         await c.until("welcome")
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "run"})
         k = 0

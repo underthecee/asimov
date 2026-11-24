@@ -144,10 +144,10 @@ def test_an_act_sent_mid_tick_is_acked_with_its_receipt_before_the_tick_ends(tmp
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": aid})
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": aid})
         await c.until("welcome")
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "speed", "tps": 1000})  # back to back: any send lands mid-tick
         god.send({"type": "control", "op": "run"})
@@ -199,7 +199,7 @@ def test_kill_mid_tick_after_an_early_ack_and_resume_to_the_same_event(tmp_path)
     r.step()
     early = []
 
-    def send(ack, evs):  # the ack goes out, then the process dies before the tick ends
+    def send(ack, evs, view=None):  # the ack goes out, then the process dies before the tick ends
         early.append((ack, evs))
         raise RuntimeError("killed mid-tick")
     t = r.sim.state["tick"]
@@ -238,7 +238,7 @@ def test_a_rerun_that_moved_an_early_acked_act_is_caught(tmp_path):
     r.inhabit(aid, "c1")
     r.step()
     t = r.sim.state["tick"]
-    r.queue_late(intent("k2", "act", {"action": "work"}, t), "c1", "inhabitant", lambda ack, evs: None)
+    r.queue_late(intent("k2", "act", {"action": "work"}, t), "c1", "inhabitant", lambda ack, evs, view=None: None)
 
     def tamper(sim, done, run=r._during):
         run(sim, done)
@@ -257,7 +257,7 @@ def test_after_a_resume_an_early_ack_the_rerun_contradicts_is_caught(tmp_path):
     r.step()
     t = r.sim.state["tick"]
 
-    def send(ack, evs):
+    def send(ack, evs, view=None):
         raise RuntimeError("killed mid-tick")
     r.queue_late(intent("k3", "act", {"action": "work"}, t), "c1", "inhabitant", send)
     with pytest.raises(RuntimeError, match="killed mid-tick"):

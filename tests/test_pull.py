@@ -29,10 +29,10 @@ def session(tmp_path, pull_min, acts=4):
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": 3})
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": 3})
         w = await c.until("welcome")
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "run"})
         await c.until("tick")  # leaving pause steps once at once; the pace starts from there
@@ -96,10 +96,10 @@ def test_a_line_said_pulls_the_tick_that_answers_it(tmp_path):
                                                 started=lambda port, hub: ready.set_result(port)))
         port = await ready
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": me})
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": me})
         await c.until("welcome")
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "run"})
         m = await c.until("tick")

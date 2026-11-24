@@ -221,18 +221,18 @@ def test_an_inhabitant_is_sent_nothing_it_could_not_perceive(tmp_path):
         port = await ready
         for agent in (25, -1, "4", None, [4], 4.0):
             c = await WS.connect(port)
-            c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": agent})
+            c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": agent})
             assert (await c.recv())["reason"] == "bad_agent" and await c.recv() is None
         c = await WS.connect(port)
-        c.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": aid})
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": aid})
         w = await c.recv()
         assert w["type"] == "welcome" and w["world"]["me"]["id"] == aid and set(w["verbs"]) == {"act"}
         check(w, None)
         taken = await WS.connect(port)
-        taken.send({"type": "hello", "protocol": 2, "scope": "inhabitant", "agent": 5})
+        taken.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": 5})
         assert (await taken.recv())["reason"] == "body_taken"
         god = await WS.connect(port)
-        god.send({"type": "hello", "protocol": 2})
+        god.send({"type": "hello", "protocol": 3})
         await god.until("welcome")
         god.send({"type": "control", "op": "run"})
         acts, receipts = {}, {}

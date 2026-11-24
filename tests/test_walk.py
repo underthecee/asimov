@@ -425,7 +425,8 @@ def test_the_live_runner_takes_a_walk_with_a_tile_and_refuses_it_without(tmp_pat
     home = r.sim.map["places"][r.sim.state["agents"][1]["home"]]
     inside, outside = [home["rect"][0], home["rect"][1]], [0, 8]
     within, leaving = intent("w1", "act", {"action": "walk", "to": inside}, 1), intent("w2", "act", {"action": "walk", "to": outside}, 1)
-    assert not r.pulls(within) and r.pulls(leaving) and r.pulls(intent("a", "act", {"action": "work"}, 1))
+    # time-1a: no walk pulls the next tick, wherever it lands; it is applied and answered as it arrives (test_time.py)
+    assert not r.pulls(within) and not r.pulls(leaving) and r.pulls(intent("a", "act", {"action": "work"}, 1))
     assert r.submit(within) is None
     _, events, acks = r.step()
     assert [a["status"] for a in acks] == ["applied"]

@@ -23,6 +23,8 @@ def replay(events: list[Event]) -> Sim:
     sim = Sim(genesis.data["seed"], len(pop["agents"]), ReplayMind(mind_events), genesis=pop, expected=events,
               order=genesis.data["order"])
     sim.run_until(end.tick, player)
+    for act in player.get(end.tick, []):  # time-1a: taken as they arrived, in a tick that never ran (Sim.take)
+        sim.take(act)
     sim.finish()
     if len(sim.events) != len(events):
         raise ReplayDivergence(f"replay produced {len(sim.events)} events, log has {len(events)}")
