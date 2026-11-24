@@ -10,7 +10,8 @@ from .sim import ANSWER_ACTS, OCCASION_TICKS, PERSON_STEPS, TALK_WHY, TICKS_PER_
 
 # The per-tick view's keys, as the spec lists them. A new field needs a spec line, and bar 5 checks this.
 VIEW_KEYS = ("tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan", "recent",
-             "present", "kin", "market_food", "occasion", "offer", "cooldown_until", "food_price", "intent", "asks")
+             "present", "kin", "market_food", "occasion", "offer", "cooldown_until", "food_price", "intent", "asks",
+             "seen")
 PUBLIC = frozenset({"fire"})            # events the whole village sees
 NAMES = ("with", "to", "target", "household")  # data fields that name the villager an event is about
 # Another villager's events it can see, and the fields of each: what it does in plain sight. Nothing that
@@ -27,7 +28,7 @@ UNSEEN_WHY = ("target not here", "target asleep", "no coin")
 
 
 def _pos(sim, a) -> list[int]:
-    return list(sim._pos(a))  # the engine's own: an anchor, a point on a walk, or the tile the player walked it to
+    return sim.tile(a)  # the engine's own (space-1): its slot at a place, a point on a walk, or the tile the player walked it to
 
 
 def present_ids(sim, aid: int) -> list[int]:
@@ -35,6 +36,17 @@ def present_ids(sim, aid: int) -> list[int]:
     agents = sim.state["agents"]
     place = agents[aid]["place"]
     return [] if place is None else [o["id"] for o in agents if o["place"] == place and o["id"] != aid]
+
+
+def sight_ids(sim, aid: int) -> list[int]:
+    """Everyone the villager sees now (space-1, B1.4): those at its place, and, when it or they are out in
+    the open, those within SEE tiles. Two places hide each other."""
+    agents = sim.state["agents"]
+    return [o["id"] for o in agents if o["id"] != aid and sim.sees(agents[aid], o)]
+
+
+def _route(r) -> dict | None:
+    return None if r is None else {"from": list(r["from"]), "to": r["to"], "depart": r["depart"], "arrive": r["arrive"]}
 
 
 def welcome_world(sim, aid: int) -> dict:
@@ -58,7 +70,7 @@ def view(sim, aid: int) -> dict:
     here = present_ids(sim, aid)
     r = a["route"]
     out = {"tick": tick, "place": a["place"],
-           "route": None if r is None else {"from": list(r["from"]), "to": r["to"], "depart": r["depart"], "arrive": r["arrive"]},
+           "route": _route(r),
            "pos": _pos(sim, a), "activity": a["activity"], "asleep": a["asleep"], "hunger": a["needs"]["hunger"],
            "food": a["inv"]["food"], "coin": a["inv"]["coin"],
            "plan": [{"activity": b["activity"], "start_h": b["start_h"], "end_h": b["end_h"]} for b in a["plan"] or []],
@@ -66,6 +78,11 @@ def view(sim, aid: int) -> dict:
            "present": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "kin": o in fam,
                         "has_food": agents[o]["inv"]["food"] > 0, "asleep": agents[o]["asleep"],  # say-1: who can hear you
                         "pos": _pos(sim, agents[o])} for o in here],
+           # space-1: those in sight who aren't here with it, across open ground. Each with what draws it: its
+           # tile, and its route if it is walking. Seen, not in reach: nothing is offered toward them.
+           "seen": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "asleep": agents[o]["asleep"],
+                     "place": agents[o]["place"], "pos": _pos(sim, agents[o]), "route": _route(agents[o]["route"])}
+                    for o in sight_ids(sim, aid) if o not in here],
            "kin": [{"id": m, "name": agents[m]["name"], "home": agents[m]["home"]} for m in fam if m != aid],
            "occasion": None, "offer": {}, "cooldown_until": a["cooldown_until"], "food_price": sim._price(),
            "intent": None,
@@ -118,7 +135,8 @@ def _ev(e) -> dict:
 
 def witnessed(e: dict, aid: int, here: set, tick: int) -> bool:
     """Whether the villager would witness this event: its own, one that names it, a public one, or (on the
-    tick it happens, live) one by someone at its place. Never a mind event: its own plan is in the view."""
+    tick it happens, live) one by someone in its sight (`here`: at its place, or seen across open ground, space-1).
+    Never a mind event: its own plan is in the view."""
     if e["origin"] == "mind" or e["kind"] in ("genesis", "checkpoint", "end"):
         return False
     if e["actor"] == aid or e["kind"] in PUBLIC:

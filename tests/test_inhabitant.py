@@ -12,6 +12,7 @@ from asiimov.events import read_jsonl
 from asiimov.minds import NoisyMind, StubMind
 from asiimov.replay import replay
 from asiimov.sim import TICKS_PER_DAY, Sim
+from asiimov.worldmap import SEE, near, place_at
 from test_live import WS
 
 SEED, AGENTS = 4, 10
@@ -182,7 +183,7 @@ def test_an_inhabitant_is_sent_nothing_it_could_not_perceive(tmp_path):
         runner.step()
     aid = min(e.actor for e in runner.sim.events if e.kind == "intent_set")
     rng = random.Random(0)
-    stats = {"acts": 0, "receipts": 0, "present": 0, "offers": 0, "others": 0, "own_intents": 0}
+    stats = {"acts": 0, "receipts": 0, "present": 0, "offers": 0, "others": 0, "own_intents": 0, "seen": 0}
 
     def check(m, me_pos):
         bad = {k for k, _ in _keys(m)} & FORBIDDEN
@@ -190,11 +191,15 @@ def test_an_inhabitant_is_sent_nothing_it_could_not_perceive(tmp_path):
         if m["type"] in ("tick", "welcome"):
             v = m["view"]
             assert set(v) <= set(inhabitant.VIEW_KEYS)
-            for p in v["present"]:
-                assert p["pos"] == v["pos"], "a position of someone not at its place"
+            for p in v["present"]:  # space-1: each stands on a tile of the place it shares with the body
+                assert place_at(runner.sim.map, p["pos"]) == v["place"], "a position of someone not at its place"
                 stats["present"] += 1
+            for p in v["seen"]:  # and the only other positions are of those in sight across open ground
+                assert (v["place"] is None or p["place"] is None) and near(v["pos"], p["pos"], SEE), \
+                    "a position of someone out of sight"
+                stats["seen"] += 1
             assert "agents" not in v
-        here = {p["id"] for p in m["view"]["present"]} if m["type"] == "tick" else set()
+        here = {p["id"] for p in m["view"]["present"] + m["view"]["seen"]} if m["type"] == "tick" else set()
         for e in m.get("events", ()):
             assert e["kind"] not in ("genesis", "checkpoint") and e["origin"] != "mind"
             assert (e["actor"] == aid or e["kind"] == "fire" or aid in [e["data"].get(k) for k in inhabitant.NAMES]
@@ -268,7 +273,7 @@ def test_an_inhabitant_is_sent_nothing_it_could_not_perceive(tmp_path):
 
     asyncio.run(main())
     runner.finish()
-    assert stats["acts"] > 20 and stats["receipts"] >= stats["acts"] - 2 and stats["present"] and stats["offers"] and stats["others"] and stats["own_intents"]
+    assert stats["acts"] > 20 and stats["receipts"] >= stats["acts"] - 2 and stats["present"] and stats["seen"] and stats["offers"] and stats["others"] and stats["own_intents"]
     events = read_jsonl(os.path.join(out, "events.jsonl"))  # noisy minds: replay the recorded replies
     assert replay(events).state_hash() == events[-1].data["hash"]
 

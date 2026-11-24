@@ -371,7 +371,7 @@ class LiveRunner:
         """Of `events` (this tick's, so far), what the inhabitant `aid` gets, as its tick message would."""
         if aid is None:
             return []
-        here, tick = set(inhabitant.present_ids(self.sim, aid)), self.sim.state["tick"]
+        here, tick = set(inhabitant.sight_ids(self.sim, aid)), self.sim.state["tick"]
         return [inhabitant.scrub(e, aid, self.sim.events) for e in event_dicts(events)
                 if inhabitant.witnessed(e, aid, here, tick)]
 
@@ -498,7 +498,7 @@ class LiveRunner:
         agents = []
         for a in sim.state["agents"]:
             r = a["route"]
-            pos = sim._pos(a)  # walk-1: a body the player walked stands on its own tile
+            pos = sim.tile(a)  # space-1: its slot at a place, a point on its walk, or the tile the player walked it to
             agents.append({"id": a["id"], "place": a["place"], "activity": a["activity"], "asleep": a["asleep"],
                            "pos": list(pos), "route": None if r is None else
                            {"from": r["from"], "to": r["to"], "depart": r["depart"], "arrive": r["arrive"]}})
@@ -506,7 +506,7 @@ class LiveRunner:
 
     def inhabitant_tick(self, tick: int, events: list[dict], aid: int) -> dict:
         """A tick as an inhabitant gets it: the events it witnessed and its own whitelisted view."""
-        here = set(inhabitant.present_ids(self.sim, aid))
+        here = set(inhabitant.sight_ids(self.sim, aid))
         return msg("tick", tick=tick, events=[inhabitant.scrub(e, aid, self.sim.events) for e in events if inhabitant.witnessed(e, aid, here, tick)],
                    view=inhabitant.view(self.sim, aid))
 

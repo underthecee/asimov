@@ -10,7 +10,7 @@ const LiveClient := preload("res://scripts/live_client.gd")
 const Words := preload("res://scripts/inhabit_ui.gd")
 const Plan := preload("res://scripts/plan_queue.gd")
 const VIEW_KEYS := ["tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan",
-		"recent", "present", "kin", "market_food", "occasion", "offer", "cooldown_until", "food_price", "intent", "asks"]
+		"recent", "present", "kin", "market_food", "occasion", "offer", "cooldown_until", "food_price", "intent", "asks", "seen"]
 
 var god := LiveClient.new()
 var me := LiveClient.new()
@@ -184,9 +184,13 @@ func _check_view(v: Dictionary) -> void:
 	for k in v:
 		if not k in VIEW_KEYS:
 			_fail("view field %s is not in the spec's whitelist" % k)
-	for p in v["present"]:
-		if p["pos"] != v["pos"]:
-			_fail("a present villager's pos %s is not at its place %s" % [p["pos"], v["pos"]])
+	for p in v["present"]:  # space-1: each stands on a tile of the place it shares with the body
+		var r = me.places[str(v["place"])]["rect"]
+		if p["pos"][0] < r[0] or p["pos"][0] >= r[0] + r[2] or p["pos"][1] < r[1] or p["pos"][1] >= r[1] + r[3]:
+			_fail("a present villager's pos %s is not in its place %s" % [p["pos"], v["place"]])
+	for p in v["seen"]:  # and the only other positions are of those in sight across open ground
+		if (v["place"] != null and p["place"] != null) or maxf(absf(p["pos"][0] - v["pos"][0]), absf(p["pos"][1] - v["pos"][1])) > 6:
+			_fail("a seen villager at %s (%s) is out of sight of %s (%s)" % [p["pos"], p["place"], v["pos"], v["place"]])
 
 
 func _process(_delta: float) -> bool:

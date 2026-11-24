@@ -1120,19 +1120,15 @@ func _draw() -> void:
 		if not name.begins_with("home"):
 			Art.label(self, rect.position + Vector2(2, 12), name, 10)
 	var t := _tick_shown()
-	var at_anchor := {}  # a place's anchor -> its rect on screen: villagers there spread over the place
 	for name in model.places:
 		var r = model.places[name]["rect"]
-		var an = model.places[name]["anchor"]
-		at_anchor[Vector2(an[0], an[1])] = Rect2(to_screen.call(Vector2(r[0], r[1])), Vector2(r[2], r[3]) * k)
-		map_rects[name] = at_anchor[Vector2(an[0], an[1])]
+		map_rects[name] = Rect2(to_screen.call(Vector2(r[0], r[1])), Vector2(r[2], r[3]) * k)
 	if map_rects.has(picked):
 		draw_rect(map_rects[picked].grow(2), Color(1, 0.9, 0.4), false, 2.0)
 	var vpx := maxf(k * 1.6, 9.0)
 	for a in model.agents:
 		var aid := int(a["id"])
-		var p := model.display_position(aid, t)
-		var spot: Vector2 = Art.spot_in(at_anchor[p], aid, vpx) if at_anchor.has(p) else to_screen.call(p)
+		var spot: Vector2 = to_screen.call(model.display_position(aid, t) + Vector2(0.5, 0.5))  # space-1: its own tile
 		var st = model.state_at(aid, int(t))
 		Art.villager(self, spot, str(a.get("role", "")), vpx, false, st[3] == "sleep")
 
@@ -1212,13 +1208,13 @@ func _draw_inhabitant() -> void:
 		if label != "":
 			tags.append([label, rect])
 	var v: Dictionary = client.view
-	var at := (_me_tiles() - lo) * k + origin
+	var at := (_me_tiles() + Vector2(0.5, 0.5) - lo) * k + origin  # a whole coordinate is a tile's centre
 	var px := maxf(k * 2.2, 12.0)
 	var here: Rect2 = map_rects.get(str(v.get("place")), Rect2(at - Vector2(px, px), Vector2(px, px) * 2)).grow(-2)
 	var seen := _map_view().grow(-px)
 	# Zoomed in, a big place runs off the column: spread the people over what shows. Not where the keys walk
 	# the body (walk-1): there each one keeps a steady spot in the place, so you can walk up to them.
-	if here.intersects(seen) and not _can_walk():
+	if here.intersects(seen) and not _can_walk():  # an older engine: no tiles, so people spread over what shows
 		here = here.intersection(seen)
 	drawn_at = {}
 	# Polish (aipt2: "the villagers cluster so I can't tell who is who"): a crowd draws at most CROWD_MAX people,
@@ -1235,10 +1231,24 @@ func _draw_inhabitant() -> void:
 	crowd.sort_custom(func(x, y): return [int(x["id"]) != talking, not speaking.has(int(x["id"])), not x["kin"], int(x["id"])] \
 			< [int(y["id"]) != talking, not speaking.has(int(y["id"])), not y["kin"], int(y["id"])])
 	var extra := maxi(0, crowd.size() - CROWD_MAX)
+	var tiles: bool = v.has("seen")  # space-1: the engine says which tile each one stands on
+	var shared := {}  # tile -> how many are drawn on it: two on one tile fan out, for drawing only
 	for p in crowd.slice(0, CROWD_MAX):
 		var spot := Art.spot_in(here, int(p["id"]), px * 0.85)
+		if tiles:
+			var tile := Vector2(p["pos"][0], p["pos"][1])
+			spot = (tile + Vector2(0.5, 0.5) - lo) * k + origin + Vector2(px * 0.3, 0) * int(shared.get(tile, 0))
+			shared[tile] = int(shared.get(tile, 0)) + 1
 		drawn_at[int(p["id"])] = spot - Vector2(0, px * 0.85)
 		Art.villager(self, spot, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
+	# Those in sight across open ground (space-1): drawn where the engine says, a walker along its route as the
+	# clock runs. In sight, not in reach: no ring, no name, and E offers nothing toward them.
+	for p in v.get("seen", []):
+		var tile := Vector2(p["pos"][0], p["pos"][1])
+		if p.get("route") != null and client.places.has(str(p["route"]["to"])):
+			var an = client.places[str(p["route"]["to"])]["anchor"]
+			tile = WorldModel.route_pos(p["route"], Vector2i(int(an[0]), int(an[1])), int(client.welcome["world"]["map"]["walk"]), client.display_tick())
+		Art.villager(self, (tile + Vector2(0.5, 0.5) - lo) * k + origin, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
 	if extra > 0:
 		tags.append(["+%d more here" % extra, Rect2(here.position + Vector2(0, here.size.y + 22), Vector2(here.size.x, 0))])
 	if drawn_at.has(talking):  # the one you're talking with, named over their head

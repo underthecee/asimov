@@ -42,11 +42,13 @@ def map_violations(sim: Sim, a: dict, longest: int) -> list[str]:
               and (not a["asleep"] or a["place"] == a["home"]))
         return [] if ok else [f"agent {aid} at tile {a['at']!r}, place {a['place']!r}, route {r} (asleep {a['asleep']})"]
     if r is None:
-        ok = a["place"] in places and (not a["asleep"] or a["place"] == a["home"])
+        ok = (a["place"] in places and (not a["asleep"] or a["place"] == a["home"])
+              and place_at(sim.map, sim.tile(a)) == a["place"])  # space-1: its slot is a tile of its own place
         return [] if ok else [f"agent {aid} at {a['place']!r} (asleep {a['asleep']})"]
     ok = (a["place"] is None and not a["asleep"] and r["to"] in places
           and sim.state["tick"] <= r["arrive"] <= r["depart"] + longest
-          and r["arrive"] == r["depart"] + travel_ticks(r["from"], places[r["to"]]["anchor"]))
+          and r["arrive"] == r["depart"] + travel_ticks(r["from"], places[r["to"]]["anchor"])
+          and on_map(sim.map, sim.tile(a)))  # space-1: a walker's tile is on the map
     return [] if ok else [f"agent {aid} place {a['place']!r} route {r}"]
 
 
