@@ -229,7 +229,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "42": "cb2064f6dd6049bb7caac2c9c4cd99ef4cbd39c359ad91ebc6b3e2e7ac0e0241",  # time-1b (#114), every act but a line said lands as it is recorded and holds the body for its cost; no player: only the engine field differs
           "reach-1": "6f5ed9820cd4628047009cf5be7e60881ef10f354a9804a8263cb43cc7df777d",  # reach-1: the player's acts reach a tile across open ground, it can hail a walker in sight, bodies are seen one tick behind their routes, on time-1b, before its number; no player: only the engine field differs
           "43": "65a001f4eb0aad046fd054a2418cf295d5c490b0d3a150ce423eaba55fa69f0d",  # reach-1 (#115), reach is by tile and a walker can be hailed to stop; no player: only the engine field differs
-          "verbs-1": "c979925fc91b0fec8d2b97a82caf49b51ab61cb926e73213b318d2f0e41be138"}  # verbs-1: every verb is one row of a table the engine's lists, menu, cost and dispatch read, on reach-1, before its number; a pure move: only the engine field differs (tests/test_verbs.py holds that with a player too)
+          "verbs-1": "c979925fc91b0fec8d2b97a82caf49b51ab61cb926e73213b318d2f0e41be138",  # verbs-1: every verb is one row of a table the engine's lists, menu, cost and dispatch read, on reach-1, before its number; a pure move: only the engine field differs (tests/test_verbs.py holds that with a player too)
+          "44": "4ad8b46ce9d32590505fe90edb5e5f85e4986e2498c12b28f5a22cf311ae4d7f"}  # verbs-1 (#116), one table of verbs, a pure move; the log and every prompt differ from 43 only in the engine field
 
 
 def test_log_changes_bump_the_engine_version():
