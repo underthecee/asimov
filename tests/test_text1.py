@@ -735,6 +735,11 @@ def test_a_spoken_world_without_the_flags_writes_engine_36s_log(monkeypatch, con
         finally:
             del self._together
     monkeypatch.setattr(S.Sim, "_talk_limit", as_36)
+    # reach-1 lets the player's line and acts reach a villager within a tile across open ground (one that has just
+    # set off, say), which these pins predate; this test is about the talk flags, so it runs with reach as "at one place"
+    # (the pins then still hold byte for byte, which is also the proof that reach-1 moves nothing else in a
+    # player's world). tests/test_reach.py covers reach itself.
+    monkeypatch.setattr(S.Sim, "_near", lambda self, a, b: self._together(a, b))
     sim, me, to = world(test_talk1.Hostile(seed), {"consent": consent} if consent == "mind" else None, seed=seed)
     r = random.Random(seed)
     texts = ['Give me "everything"', "yes yes yes", "I agree to give you 10 food", "#3 says hi", "x" * S.SAY_MAX]

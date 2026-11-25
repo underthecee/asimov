@@ -7,6 +7,7 @@
 extends SceneTree
 
 const LiveClient := preload("res://scripts/live_client.gd")
+const WorldModel := preload("res://scripts/world_model.gd")
 const Words := preload("res://scripts/inhabit_ui.gd")
 const Plan := preload("res://scripts/plan_queue.gd")
 const VIEW_KEYS := ["tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan",
@@ -189,8 +190,19 @@ func _check_view(v: Dictionary) -> void:
 		if p["pos"][0] < r[0] or p["pos"][0] >= r[0] + r[2] or p["pos"][1] < r[1] or p["pos"][1] >= r[1] + r[3]:
 			_fail("a present villager's pos %s is not in its place %s" % [p["pos"], v["place"]])
 	for p in v["seen"]:  # and the only other positions are of those in sight across open ground
-		if (v["place"] != null and p["place"] != null) or maxf(absf(p["pos"][0] - v["pos"][0]), absf(p["pos"][1] - v["pos"][1])) > 6:
-			_fail("a seen villager at %s (%s) is out of sight of %s (%s)" % [p["pos"], p["place"], v["pos"], v["place"]])
+		# reach-1: a walker's tiles are told for the span of the tick it is in sight for (`track`), each within
+		# sight of where the body is at that moment, which moves too if it is walking.
+		var pts: Array = p.get("track", []).duplicate()
+		if not p.has("track") or int(p["in"][0]) == 0:
+			pts.append([0, p["pos"][0], p["pos"][1]])
+		for q in pts:
+			var mine := Vector2(v["pos"][0], v["pos"][1])
+			if v["route"] != null:
+				var an = me.places[str(v["route"]["to"])]["anchor"]
+				mine = WorldModel.route_pos(v["route"], Vector2i(int(an[0]), int(an[1])), int(me.welcome["world"]["map"]["walk"]),
+						float(v["tick"]) + float(q[0]) / 600.0 - 1.0).floor()
+			if (v["place"] != null and p["place"] != null) or maxf(absf(q[1] - mine.x), absf(q[2] - mine.y)) > 6:
+				_fail("a seen villager at %s (%s) is out of sight of %s (%s)" % [q, p["place"], mine, v["place"]])
 
 
 func _process(_delta: float) -> bool:

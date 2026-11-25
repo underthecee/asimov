@@ -36,7 +36,7 @@ from collections import defaultdict
 from . import inhabitant, narrate, persist
 from .llm import SCHEMAS
 from .minds import NoisyMind, ScriptMind, StubMind
-from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
+from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, HAIL_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
                   TICKS_PER_DAY, act_cost)
 from .worldmap import bounds, on_map
 
@@ -186,7 +186,7 @@ class LiveRunner:
         world. From time-1b the other acts are answered at once too; they still pull, since what they start
         (a trip, a villager's answer, a line said) shows in the next tick. That is pacing, not a rule."""
         args = m.get("args") if isinstance(m.get("args"), dict) else {}
-        return args.get("action") not in WALK_ACTS
+        return args.get("action") not in WALK_ACTS + HAIL_ACTS  # reach-1: nor a hail, which starts nothing a tick shows
 
     def _held_agent(self) -> int | None:
         return self._held_from()[0]
@@ -280,6 +280,7 @@ class LiveRunner:
                                                              and 0 < len(text) <= SAY_MAX and text.strip() != ""
                                                              and text.isprintable())) \
                 and args["action"] in PLAYER_ACTIONS and (t is None or (_is_int(t) and 0 <= t < n)) \
+                and (args["action"] not in HAIL_ACTS or t is not None) \
                 and (place is None) != go and (not go or (t is None and isinstance(place, str)
                                                           and place in self.sim.map["places"]))
             act = {"kind": "act", "action": args.get("action")} if t is None else \
@@ -433,8 +434,9 @@ class LiveRunner:
         if aid is None:
             return []
         here, tick = set(inhabitant.sight_ids(self.sim, aid)), self.sim.state["tick"]
-        return [inhabitant.scrub(e, aid, self.sim.events) for e in event_dicts(events)
-                if inhabitant.witnessed(e, aid, here, tick)]
+        near = set(inhabitant.near_ids(self.sim, aid))  # reach-1: words and doings need its place or reach
+        return [inhabitant.scrub(e, aid, self.sim.events, near) for e in event_dicts(events)
+                if inhabitant.witnessed(e, aid, here, tick, near)]
 
     def _ack_scheduled(self, sim):
         """At the fixed point, the tick's intents scheduled before it began have applied: ack them now, with
@@ -572,8 +574,9 @@ class LiveRunner:
 
     def inhabitant_tick(self, tick: int, events: list[dict], aid: int) -> dict:
         """A tick as an inhabitant gets it: the events it witnessed and its own whitelisted view."""
-        here = set(inhabitant.sight_ids(self.sim, aid))
-        return msg("tick", tick=tick, events=[inhabitant.scrub(e, aid, self.sim.events) for e in events if inhabitant.witnessed(e, aid, here, tick)],
+        here, near = set(inhabitant.sight_ids(self.sim, aid)), set(inhabitant.near_ids(self.sim, aid))
+        return msg("tick", tick=tick, events=[inhabitant.scrub(e, aid, self.sim.events, near) for e in events
+                                              if inhabitant.witnessed(e, aid, here, tick, near)],
                    view=inhabitant.view(self.sim, aid))
 
     def welcome(self, scope: str, paused: bool, tps: float) -> dict:

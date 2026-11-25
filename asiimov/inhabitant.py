@@ -6,7 +6,8 @@ the live runner calls it between ticks, and test_inhabitant checks the log still
 """
 import json
 
-from .sim import ANSWER_ACTS, OCCASION_TICKS, PERSON_STEPS, TALK_WHY, TICKS_PER_DAY
+from .sim import ANSWER_ACTS, OCCASION_TICKS, PERSON_STEPS, SUB, TALK_WHY, TICKS_PER_DAY
+from .worldmap import SEE, near
 
 # The per-tick view's keys, as the spec lists them. A new field needs a spec line, and bar 5 checks this.
 VIEW_KEYS = ("tick", "place", "route", "pos", "activity", "asleep", "hunger", "food", "coin", "plan", "recent",
@@ -20,11 +21,16 @@ SEEN = {"activity": ("activity", "place", "arrive", "from"), "arrive": ("place",
         "sleep": (), "talk": ("with", "place", "gossip"), "meet": ("with", "place"), "snub": ("with",),
         "eat": ("household",), "sell": ("food",), "fire": ("family",), "ask": ("action", "to"),
         "said": ("with", "text", "place", "move", "price"), "reply": ("with", "says", "answer"),  # say-1, talk-1
-        "deal": ("move", "from", "to", "food", "coin", "ok", "why")}  # talk-1: what a yes moved, in plain sight
+        "deal": ("move", "from", "to", "food", "coin", "ok", "why"),  # talk-1: what a yes moved, in plain sight
+        "halt": ("pos", "place", "depart", "arrive")}  # reach-1: a walker the player hailed or spoke to stops
 SEEN_NAMING = {**SEEN, "receipt": ("action", "ok", "why", "to", "answered")}  # also a receipt for an act aimed at it
 # Another's act aimed at it that failed before reaching it: it saw nothing (and "no coin" would show another's
 # purse). Kept when it settles a held ask (parents beyond the act: the ask), which the villager did see.
 UNSEEN_WHY = ("target not here", "target asleep", "no coin")
+# reach-1 (Steering 2026-11-23 20:26Z): what sight alone shows of someone who is neither at its place nor in
+# reach: who stands where, and that someone spoke, without the words. No activity, sleep, meal, sale or deal.
+SIGHT = {"activity": ("place", "arrive", "from"), "arrive": ("place",), "halt": ("pos", "place", "depart", "arrive"),
+         "talk": ("with", "place"), "said": ("with", "place"), "reply": ("with",)}
 
 
 def _pos(sim, a) -> list[int]:
@@ -43,6 +49,40 @@ def sight_ids(sim, aid: int) -> list[int]:
     the open, those within SEE tiles. Two places hide each other."""
     agents = sim.state["agents"]
     return [o["id"] for o in agents if o["id"] != aid and sim.sees(agents[aid], o)]
+
+
+def near_ids(sim, aid: int) -> list[int]:
+    """Those whose words and doings the villager takes in (reach-1): at its place, or within reach across open
+    ground. The rest of those in sight are seen standing or walking, and no more."""
+    agents = sim.state["agents"]
+    return [o["id"] for o in agents if o["id"] != aid and sim.reach(agents[aid], o)]
+
+
+def passing(sim, aid: int) -> dict:
+    """reach-1: the walkers in sight of the villager at some time in the coming tick, each with `in`, the span
+    it is in sight for ([first, last], in SUBths of the tick: sim-seconds), and `track`, the tiles it is seen
+    on then, [f, x, y] a tile or so apart. Where every walker will be until the next step is known, so one
+    that walks by while the body stands is seen as it passes and can be drawn, and nothing of it outside
+    that span is told. Sampled every 5 sim-seconds, a third of a tile of walking."""
+    agents, n0 = sim.state["agents"], sim.state["tick"] * SUB
+    a, out = agents[aid], {}
+    for o in agents:
+        if o["id"] == aid or o["route"] is None:
+            continue
+        fs = [f for f in range(0, SUB, 5) if near(sim.tile_n(a, n0 + f), sim.tile_n(o, n0 + f), SEE)]
+        if fs:
+            run = [fs[0]]  # the first unbroken stretch: it comes into sight once as it passes
+            for f in fs[1:]:
+                if f != run[-1] + 5:
+                    break
+                run.append(f)
+            ks = sorted(set(run[::3]) | {run[-1]})
+            track = [[f] + sim.tile_n(o, n0 + f) for f in ks]
+            last = len(track) - 1  # one that stands a while is told once at each end of its stand
+            out[o["id"]] = {"in": [run[0], min(run[-1] + 4, SUB - 1)],
+                            "track": [p for i, p in enumerate(track) if i in (0, last)
+                                      or p[1:] != track[i - 1][1:] or p[1:] != track[i + 1][1:]]}
+    return out
 
 
 def _route(r) -> dict | None:
@@ -68,6 +108,7 @@ def view(sim, aid: int) -> dict:
     tick, agents, a = st["tick"], st["agents"], st["agents"][aid]
     fam = st["families"][a["family"]]["members"]
     here = present_ids(sim, aid)
+    going, sight = passing(sim, aid), sight_ids(sim, aid)
     r = a["route"]
     out = {"tick": tick, "place": a["place"],
            "route": _route(r),
@@ -79,10 +120,18 @@ def view(sim, aid: int) -> dict:
                         "has_food": agents[o]["inv"]["food"] > 0, "asleep": agents[o]["asleep"],  # say-1: who can hear you
                         "pos": _pos(sim, agents[o])} for o in here],
            # space-1: those in sight who aren't here with it, across open ground. Each with what draws it: its
-           # tile, and its route if it is walking. Seen, not in reach: nothing is offered toward them.
-           "seen": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "asleep": agents[o]["asleep"],
-                     "place": agents[o]["place"], "pos": _pos(sim, agents[o]), "route": _route(agents[o]["route"])}
-                    for o in sight_ids(sim, aid) if o not in here],
+           # tile, and its route if it is walking. reach-1: one within a tile is in reach (`reach`), may be named
+           # in an act, and shows whether it sleeps; the rest are seen standing or walking, and no more.
+           # A walker carries `in`, the span of this tick (in 600ths) it is in sight for, and one that comes
+           # into sight later in the tick is listed too, to be drawn as it passes.
+           "seen": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"],
+                     "place": agents[o]["place"], "pos": _pos(sim, agents[o]), "route": _route(agents[o]["route"]),
+                     **going.get(o, {}),
+                     **({"reach": True, "asleep": agents[o]["asleep"]} if sim.reach(a, agents[o]) else {})}
+                    for o in sight if o not in here]
+           + [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "place": None,
+               "pos": g["track"][0][1:], "route": None, **g}  # not in sight yet: where it will first be seen
+              for o, g in going.items() if o not in sight and o not in here],
            "kin": [{"id": m, "name": agents[m]["name"], "home": agents[m]["home"]} for m in fam if m != aid],
            "occasion": None, "offer": {}, "cooldown_until": a["cooldown_until"], "food_price": sim._price(),
            "intent": None,
@@ -102,7 +151,7 @@ def view(sim, aid: int) -> dict:
                            "text": sim._occasion_text(a, occ).removeprefix(" Why you stop to think: ").rstrip(".")}
     if not a["asleep"]:
         occupancy = {a["place"]: [aid] + here} if a["place"] is not None else {}
-        v = sim._view(a, occupancy)
+        v = sim._view(a, occupancy, reach=True)  # reach-1: the people it may name are those in reach
         if out["occasion"]:
             v["occasion"] = {k: occ.get(k) for k in ("why", "who", "detail")}
         v["offer"] = sim._offer(a, v)
@@ -110,6 +159,11 @@ def view(sim, aid: int) -> dict:
         out["offer"] = {x: (v["people"] if x in PERSON_STEPS else []) for x in sim._offer(a, v)}
         if out["asks"]:  # player-ask-1: answering an ask aimed at it, named by the asker
             out["offer"].update({x: [q["from"] for q in out["asks"]] for x in ANSWER_ACTS})
+        # reach-1: who it can call to as they pass this tick: a walker still on its way that hasn't been stopped
+        hail = [o for o, g in going.items() if not sim._halted(agents[o])
+                and any(sim.can_hail(a, agents[o], tick * SUB + k[0]) is None for k in g["track"])]
+        if hail:
+            out["offer"]["hail"] = hail
     assert set(out) <= set(VIEW_KEYS), "a view field outside the spec's list"
     return out
 
@@ -133,17 +187,20 @@ def _ev(e) -> dict:
     return {"actor": e.actor, "kind": e.kind, "data": e.data, "parents": e.parents}
 
 
-def witnessed(e: dict, aid: int, here: set, tick: int) -> bool:
+def witnessed(e: dict, aid: int, here: set, tick: int, near: set | None = None) -> bool:
     """Whether the villager would witness this event: its own, one that names it, a public one, or (on the
     tick it happens, live) one by someone in its sight (`here`: at its place, or seen across open ground, space-1).
-    Never a mind event: its own plan is in the view."""
+    reach-1: of someone in sight who isn't in `near` (at its place or in reach; all of `here` when left out)
+    only what SIGHT lists. Never a mind event: its own plan is in the view."""
     if e["origin"] == "mind" or e["kind"] in ("genesis", "checkpoint", "end"):
         return False
     if e["actor"] == aid or e["kind"] in PUBLIC:
         return True
     if e["kind"] in SEEN_NAMING and any(e["data"].get(k) == aid for k in NAMES):
         return not (e["kind"] == "receipt" and e["data"].get("why") in UNSEEN_WHY and len(e["parents"]) < 2)
-    return e["kind"] in SEEN and e["tick"] == tick and e["actor"] in here
+    if e["kind"] not in SEEN or e["tick"] != tick or e["actor"] not in here:
+        return False
+    return near is None or e["actor"] in near or e["kind"] in SIGHT
 
 
 # Acts aimed at the villager whose actor's own words it is told (Steering, 2026-11-10, joon's "show their
@@ -197,12 +254,16 @@ def _parse(mind: dict) -> dict | None:
     return out if isinstance(out, dict) else None
 
 
-def scrub(e: dict, aid: int, log=None) -> dict:
+def scrub(e: dict, aid: int, log=None, near: set | None = None) -> dict:
     """An event as an inhabitant gets it: no mind record (prompt hash, raw output), no chance-stream draws,
     and of another villager's event only the fields SEEN lists, plus (given the log) `says`: the actor's own
-    words for an act aimed at this villager."""
+    words for an act aimed at this villager. reach-1: given `near`, an event by someone outside it that doesn't
+    name this villager carries only what SIGHT lists: that it moved or spoke, never the words."""
     if e["actor"] == aid:  # its own, with its own intent's goal and steps (what it meant to do)
         data = {k: v for k, v in e["data"].items() if k not in ("stream", "index", "pick_stream", "jitter_min")}
+    elif near is not None and e["actor"] not in near and e["kind"] in SIGHT \
+            and not any(e["data"].get(k) == aid for k in NAMES):
+        data = {k: e["data"][k] for k in SIGHT[e["kind"]] if k in e["data"]}
     else:
         data = {k: e["data"][k] for k in SEEN_NAMING[e["kind"]] if k in e["data"]}
         said = says(log, e, aid) if log is not None else None

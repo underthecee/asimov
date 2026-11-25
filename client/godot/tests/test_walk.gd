@@ -9,6 +9,7 @@ extends SceneTree
 const LiveClient := preload("res://scripts/live_client.gd")
 const WorldModel := preload("res://scripts/world_model.gd")
 const Keys := preload("res://scripts/walk_keys.gd")
+const Words := preload("res://scripts/inhabit_ui.gd")
 
 var god := LiveClient.new()
 var me := LiveClient.new()
@@ -69,6 +70,33 @@ func _start() -> void:
 			or wm.state_at(0, 7)[1] != "plaza" or wm.position(0, 9) != Vector2i(0, 8) or wm.state_at(0, 9)[1] != null \
 			or wm.present("plaza", 9) != [] or wm.state_at(0, 10)[2]["from"] != [0, 8] or wm.position(0, 11) != home:
 		return _fail("the world model doesn't place a walked body: %s" % [wm.moves[0]])
+	# reach-1: a walker stopped on its way stands on the halt's tile until it leaves, then walks on; a body is
+	# drawn one tick behind its route (Sim.pos).
+	var hw := WorldModel.new()
+	hw.load_world({"map": {"walk": 10, "places": {"home_0": {"anchor": [20, 20], "rect": [17, 17, 6, 6]},
+			"plaza": {"anchor": [0, 0], "rect": [-5, -5, 10, 10]}}},
+			"population": {"families": [{"home": "home_0"}], "agents": [{"id": 0, "family": 0}]}})
+	hw.add_event({"tick": 5, "kind": "activity", "actor": 0, "data": {"activity": "home", "place": "home_0", "arrive": 9, "from": [0, 0]}})
+	if hw.position(0, 6) != Vector2i(0, 0) or hw.pos_at(0, 6.5) != Vector2(5, 0):
+		return _fail("a walk isn't drawn from its start: %s at 6, %s at 6.5" % [hw.position(0, 6), hw.pos_at(0, 6.5)])
+	hw.add_event({"tick": 6, "kind": "halt", "actor": 0, "data": {"pos": [5, 0], "place": "home_0", "depart": 8, "arrive": 12}})
+	if hw.position(0, 7) != Vector2i(5, 0) or hw.position(0, 9) != Vector2i(5, 0) or hw.pos_at(0, 9.5) != Vector2(10, 0) \
+			or hw.position(0, 13) != Vector2i(20, 20) or hw.state_at(0, 7)[3] != "home":
+		return _fail("the world model doesn't stand a stopped walker: %s" % [hw.moves[0]])
+	# reach-1, the view: a walker is drawn along the tiles the server lists, only while it is in sight; one in
+	# reach is acted on like someone here; one walking by can be called to.
+	var by := {"present": [], "kin": [{"id": 6, "name": "Cal"}], "offer": {"ask_food": [6], "ask_kin": [6], "hail": [8], "rest": []},
+			"seen": [{"id": 6, "name": "Cal", "reach": true}, {"id": 8, "name": "Dov", "in": [100, 300], "track": [[100, 6, 0], [200, 2, 0], [300, -2, 0]]}]}
+	var passer: Dictionary = by["seen"][1]
+	if Keys.track_tile(passer, 50.0) != null or Keys.track_tile(passer, 150.0) != Vector2(4, 0) \
+			or Keys.track_tile(passer, 300.5) != Vector2(-2, 0) or Keys.track_tile(passer, 302.0) != null:
+		return _fail("a passer isn't drawn along its track: %s" % [[Keys.track_tile(passer, 50.0), Keys.track_tile(passer, 150.0), Keys.track_tile(passer, 300.5)]])
+	labels = []
+	for it in Keys.items(by, 6, {6: "Cal", 8: "Dov"}, true) + Keys.items(by, 8, {6: "Cal", 8: "Dov"}, false):
+		labels.append("%s/%s/%d" % [it["label"], it["action"], it["target"]])
+	if labels != ["Talk to Cal/talk/6", "Ask Cal for food/ask_food/6", "Ask Cal (family) for food/ask_kin/6", "Rest/rest/-1",
+			"Call out to Dov/hail/8", "Rest/rest/-1"] or Words.in_reach(by).size() != 1 or not Words.near(by).get(6, false):
+		return _fail("the E list for someone in reach and someone walking by reads %s" % [labels])
 	var a := OS.get_cmdline_user_args()
 	me.scope = "inhabitant"
 	me.agent = int(a[1])

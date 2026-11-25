@@ -667,12 +667,17 @@ var _talk_key := ""
 var _talk_to := -1
 
 
+func _hailable() -> Array:
+	## reach-1: whom the server offers to call out to: those walking by in sight this tick.
+	return client.view.get("offer", {}).get("hail", []).map(func(x): return int(x))
+
+
 func _hearers() -> Array:
 	## Who can hear you now: the people here and awake (the server checks again when it applies).
 	var v: Dictionary = client.view
 	var ids := []
 	if not v.get("asleep", true):
-		for p in v.get("present", []):
+		for p in v.get("present", []) + Words.in_reach(v):  # reach-1: or within a tile of you, in the open
 			# Someone who answered you and walked away is still listed for the tick they leave on: a line to them
 			# would arrive after they'd gone (pt11, Steering 2026-11-18 23:52Z).
 			if not p.get("asleep", false) and int(v["tick"]) - int(leaving.get(int(p["id"]), -99)) > 2:
@@ -888,7 +893,11 @@ func _e_pick(i: int) -> void:
 
 
 func _talk_with(t: int) -> void:
-	## The Talk box on this villager, ready to type.
+	## The Talk box on this villager, ready to type. reach-1: someone walking by, too far to hear a line, is
+	## called to instead (the server's `hail`): they stop and wait, and you can walk up to them.
+	if t >= 0 and not _hearers().has(t) and _hailable().has(t):
+		_choose("hail", t, "", Words.action_label("hail", str(names.get(t, "them"))))
+		return
 	if t >= 0 and _hearers().has(t):
 		talk.pick(t)
 		_talk_key = ""
@@ -1003,9 +1012,7 @@ func _rebuild_menu() -> void:
 		var l := Label.new()
 		l.text = "Nothing to do while asleep." if v["asleep"] else "Nothing to choose right now."
 		box.add_child(l)
-	var present := {}
-	for p in v["present"]:
-		present[int(p["id"])] = p["kin"]
+	var present := Words.near(v)
 	var rows := {}  # one row of short buttons per person; the actions that name nobody come first
 	var askers := {}
 	for q in v.get("asks", []):
@@ -1258,14 +1265,25 @@ func _draw_inhabitant() -> void:
 			shared[tile] = int(shared.get(tile, 0)) + 1
 		drawn_at[int(p["id"])] = spot - Vector2(0, px * 0.85)
 		Art.villager(self, spot, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
-	# Those in sight across open ground (space-1): drawn where the engine says, a walker along its route as the
-	# clock runs. In sight, not in reach: no ring, no name, and E offers nothing toward them.
+	# Those in sight across open ground (space-1): drawn where the engine says. reach-1: a walker is drawn along
+	# the tiles the server says it is seen on, for as long as it is in sight this tick, and no longer. One in
+	# reach, or one walking by that can be called to, can be picked with E and T like someone here; the rest
+	# get no ring and no name.
+	var f := (client.display_tick() - float(v["tick"])) * 600.0
+	var hail := _hailable()
 	for p in v.get("seen", []):
-		var tile := Vector2(p["pos"][0], p["pos"][1])
-		if p.get("route") != null and client.places.has(str(p["route"]["to"])):
+		var tile = Vector2(p["pos"][0], p["pos"][1])
+		if p.has("track"):
+			tile = Keys.track_tile(p, f)
+			if tile == null:
+				continue  # not in sight yet, or already past
+		elif p.get("route") != null and client.places.has(str(p["route"]["to"])):  # an engine before reach-1
 			var an = client.places[str(p["route"]["to"])]["anchor"]
-			tile = WorldModel.route_pos(p["route"], Vector2i(int(an[0]), int(an[1])), int(client.welcome["world"]["map"]["walk"]), client.display_tick())
-		Art.villager(self, (tile + Vector2(0.5, 0.5) - lo) * k + origin, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
+			tile = WorldModel.route_pos(p["route"], Vector2i(int(an[0]), int(an[1])), int(client.welcome["world"]["map"]["walk"]), client.display_tick() - 1.0)  # one tick behind its route, as Sim.pos
+		var spot: Vector2 = (tile + Vector2(0.5, 0.5) - lo) * k + origin
+		if p.get("reach", false) or hail.has(int(p["id"])):
+			drawn_at[int(p["id"])] = spot - Vector2(0, px * 0.85)
+		Art.villager(self, spot, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
 	if extra > 0:
 		tags.append(["+%d more here" % extra, Rect2(here.position + Vector2(0, here.size.y + 22), Vector2(here.size.x, 0))])
 	if drawn_at.has(talking):  # the one you're talking with, named over their head
@@ -1273,11 +1291,12 @@ func _draw_inhabitant() -> void:
 		if who != "":
 			tags.append([who, Rect2(drawn_at[talking] - Vector2(0, 4), Vector2.ZERO)])
 	Art.villager(self, at, str(client.me.get("role", "")), px, true, bool(v["asleep"]))
-	reach = Keys.nearest(drawn_at, int(client.me["id"]), at - Vector2(0, px * 0.85), px * 3.5) if _can_walk() and v.get("place") != null else -1
+	reach = Keys.nearest(drawn_at, int(client.me["id"]), at - Vector2(0, px * 0.85), px * 3.5) if _can_walk() else -1
 	if reach >= 0:  # who E and T reach: a ring at their feet and their name
 		draw_arc(drawn_at[reach] + Vector2(0, px * 0.85), px * 0.55, 0.0, TAU, 28, Color(0.55, 0.9, 1.0, 0.95), 2.0)
-		if reach != talking:
-			tags.append([str(names.get(reach, "")), Rect2(drawn_at[reach] - Vector2(0, 4), Vector2.ZERO)])
+		if reach != talking:  # someone walking by, too far for a line: T calls out, and they stop and wait
+			tags.append([str(names.get(reach, "")) + ("  (T: call out)" if hail.has(reach) and not _hearers().has(reach) else ""),
+					Rect2(drawn_at[reach] - Vector2(0, 4), Vector2.ZERO)])
 	drawn_at[int(client.me["id"])] = at - Vector2(0, px * 1.1)
 	var night := night_shade(fmod(client.display_tick(), float(client.ticks_per_day())) * 24.0 / client.ticks_per_day())
 	if night > 0.0:  # day and night (V-pass, left from #76): over the ground and people, under every word

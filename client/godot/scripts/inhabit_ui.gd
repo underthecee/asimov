@@ -9,17 +9,19 @@ const ACTION := {"buy_food": "Buy food at the market", "go_market": "Go to the m
 		"ask_food": "Ask %s for food", "buy_from": "Buy food from %s", "steal": "Steal food from %s",
 		"give_food": "Give food to %s", "give_coin": "Give a coin to %s", "seek": "Go and find %s",
 		"avoid": "Keep away from %s", "work": "Go to work", "socialize": "Go and see people", "home": "Go home",
-		"rest": "Rest", "explore": "Explore", "wait": "Wait", "agree": "Say yes to %s", "decline": "Say no to %s"}
+		"rest": "Rest", "explore": "Explore", "wait": "Wait", "agree": "Say yes to %s", "decline": "Say no to %s",
+		"hail": "Call out to %s"}  # reach-1: someone walking by stops and waits for you
 const NOW := {"work": "Working", "shop": "Shopping", "socialize": "Seeing people", "home": "Staying",
 		"rest": "Resting", "explore": "Exploring", "visit": "Visiting"}
 const SHORT := {"ask_kin": "ask family for food", "ask_food": "ask for food", "buy_from": "buy food", "steal": "steal food",
 		"give_food": "give food", "give_coin": "give a coin", "seek": "go to them", "avoid": "keep away",
-		"agree": "give", "decline": "not now", "say": "say something"}  # talk-1: an ask's two chips
+		"agree": "give", "decline": "not now", "say": "say something",  # talk-1: an ask's two chips
+		"hail": "call out"}
 const DOING := {"buy_food": "buy food", "go_market": "go to the market", "ask_kin": "ask family for food",
 		"ask_food": "ask for food", "buy_from": "buy food", "steal": "steal", "give_food": "give food",
 		"give_coin": "give a coin", "seek": "find someone", "avoid": "keep away", "work": "go to work",
 		"socialize": "see people", "home": "go home", "rest": "rest", "explore": "explore", "wait": "wait",
-		"agree": "say yes", "decline": "say no", "say": "say something"}
+		"agree": "say yes", "decline": "say no", "say": "say something", "hail": "call out to"}
 const WHY := {"heading to market": "you head to the market", "started": "you start", "waited": "you wait",
 		"said": "they heard you",
 		"not in talk": "goods don't change hands in talk",
@@ -45,7 +47,9 @@ const WHY := {"heading to market": "you head to the market", "started": "you sta
 		"no food to give": "you have no food to give", "no coin to give": "you have no coin to give", "no stock": "the market has no food left",
 		"unparseable or unknown action": "that isn't something you can do",
 		"heading there": "you set off", "already here": "you're already there", "arrived": "you arrive",
-		"time ran out": "it took too long", "price changed": "the price changed; check it and offer again"}
+		"time ran out": "it took too long", "price changed": "the price changed; check it and offer again",
+		"hailed": "they stop and wait for you", "already stopped": "they're already waiting for you",
+		"not walking": "they aren't walking by", "target not in sight": "they're too far to hear you"}
 const TO_YOU := {"gave": "you gave them 1 food", "sold": "you sold them 1 food", "refused": "you said no",
 		"kin gave food": "you gave them food", "kin refused": "you said no", "stolen": "they stole food from you",
 		"caught": "you caught them stealing", "nothing to spare": "you had nothing to spare",
@@ -149,6 +153,8 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 			return "%s head%s off to %s at %s." % [a, "" if mine else "s", v, place(d.get("place"), me)]
 		"arrive":
 			return "%s arrive%s at %s." % [a, "" if mine else "s", place(d.get("place"), me)]
+		"halt":  # reach-1: a walker called to, or spoken to, stops where it is and waits a little
+			return "%s stop%s and wait%s." % [a, "" if mine else "s", "" if mine else "s"]
 		"eat":
 			if d.get("household") != null and mine:
 				return "You eat from %s's food." % _who(d["household"], me_id, names)
@@ -169,6 +175,8 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 			return "You get over the sickness." if mine else ""
 		"talk":
 			var line := "%s talk%s with %s." % [a, "" if mine else "s", _who(d.get("with"), me_id, names)]
+			if not d.has("gossip"):  # reach-1: seen from too far to hear
+				return line
 			for g in d.get("gossip", []):
 				var k := str(g[1])
 				if k.begins_with("thief:"):
@@ -187,6 +195,8 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 				return "%s %s. Give, or not now?" % [a, what]
 			return "%s %s." % [a, what.replace("you", _who(d.get("to"), me_id, names))]
 		"said":  # say-1: words spoken aloud, the player's own included; talk-1: and the chip it was said with
+			if not d.has("text"):  # reach-1: seen speaking, from too far to hear the words
+				return "%s says something to %s, too far off to hear." % [a, _who(d.get("with"), me_id, names)]
 			var ask := ""
 			match str(d.get("move", "")):
 				"asks_food":
@@ -198,6 +208,8 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 		"deal":  # talk-1: what a yes moved, or why it moved nothing
 			return deal_line(d, me_id, names)
 		"reply":  # say-1: a villager's answer to what was said to it
+			if not d.has("says"):  # reach-1: seen answering, from too far to hear
+				return "%s answers %s, too far off to hear." % [a, _who(d.get("with"), me_id, names)]
 			var w := str(d.get("says", ""))
 			if w == "":
 				return "%s doesn't answer." % a
@@ -426,18 +438,43 @@ static func asks(v: Dictionary, names: Dictionary, secs_per_tick: float) -> Stri
 	return "\n".join(out)
 
 
+static func in_reach(v: Dictionary) -> Array:
+	## reach-1: those the body can speak to and act on though they share no place with it: within a tile of it,
+	## across open ground. The server marks them (`reach`) in `seen`.
+	return v.get("seen", []).filter(func(p): return p.get("reach", false))
+
+
+static func near(v: Dictionary) -> Dictionary:
+	## id -> kin, for everyone at the body's place or in reach of it: whom an act that needs its target here may name.
+	var kin := {}
+	for m in v.get("kin", []):
+		kin[int(m["id"])] = true
+	var out := {}
+	for p in v.get("present", []):
+		out[int(p["id"])] = bool(p.get("kin", false))
+	for p in in_reach(v):
+		out[int(p["id"])] = kin.has(int(p["id"]))
+	return out
+
+
 static func here(v: Dictionary, doing: Dictionary) -> String:
-	if v["present"].is_empty():
+	var close := in_reach(v)
+	if v["present"].is_empty() and close.is_empty():
 		if v["place"] != null:
 			return "Nobody else is here."
+		if not v.get("offer", {}).get("hail", []).is_empty():
+			return "Someone is walking by. Press T to call out to them."
 		return "You're on the road." if v.get("route") != null else "Nobody: you're out in the open. Walk into a place to meet people."
+	var kin := near(v)
 	var out := []
-	for p in v["present"]:
+	for p in v["present"] + close:
 		var tags := []
-		if p["kin"]:
+		if kin.get(int(p["id"]), false):
 			tags.append("family")
-		if p["has_food"]:
+		if p.get("has_food", false):
 			tags.append("has food")
+		if p.get("reach", false):
+			tags.append("beside you")
 		var line := "%s, %s" % [p["name"], p["role"]]
 		if not tags.is_empty():
 			line += " (" + ", ".join(tags) + ")"

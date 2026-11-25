@@ -47,13 +47,26 @@ static func nearest(drawn_at: Dictionary, me_id: int, at: Vector2, radius: float
 	return best
 
 
+static func track_tile(p: Dictionary, f: float):
+	## reach-1: where a walker the server lists in `seen` is, `f` 600ths into the tick, along the tiles it is
+	## seen on (`track`: [f, x, y] each), or null outside the span it is in sight for (`in`). Drawing only.
+	var span: Array = p["in"]
+	if f < float(span[0]) or f > float(span[1]) + 1.0:
+		return null
+	var a: Array = p["track"][0]
+	for b in p["track"]:
+		if float(b[0]) >= f:
+			var w := 0.0 if b[0] == a[0] else (f - float(a[0])) / (float(b[0]) - float(a[0]))
+			return Vector2(a[1], a[2]).lerp(Vector2(b[1], b[2]), clampf(w, 0.0, 1.0))
+		a = b
+	return Vector2(a[1], a[2])
+
+
 static func items(v: Dictionary, target: int, names: Dictionary, can_hear: bool) -> Array:
 	## The E list: what can be done with the villager in reach (talk, then whatever the server offers that names
-	## them), then what the server offers that names nobody. Each {label, action, target}; "talk" is the client's
+	## them: for someone walking by in sight, calling out to them), then what the server offers that names nobody. Each {label, action, target}; "talk" is the client's
 	## own (it puts the Talk box on them). The offer is the server's: nothing is added to it here.
-	var present := {}
-	for p in v.get("present", []):
-		present[int(p["id"])] = bool(p.get("kin", false))
+	var present := Words.near(v)  # at the body's place, or in reach of it (reach-1)
 	var out := []
 	var menu := LiveClient.menu(v)
 	if target >= 0:

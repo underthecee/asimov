@@ -189,8 +189,9 @@ is the dev/review tool until a game design says what divine power costs.
 
 ## Every body on a tile (space-1, plan/v0-contracts-spec.md B1)
 - `Sim.pos(a, t)` is a pure function of the state and a sim-time `t` in ticks, whole or a Fraction (the core
-  has no floats): the tile the player walked the body to; else a walker's point on its route at `t`
-  (`worldmap.position`, between tiles when `t` is); else its slot at its place. `Sim.tile(a, t)` is the floor.
+  has no floats): the tile the player walked the body to; else a walker's point on its route at `t - 1`
+  (`worldmap.position`, between tiles when `t` is; reach-1, below: a body is seen one tick behind its route);
+  else its slot at its place. `Sim.tile(a, t)` is the floor.
 - A slot is a tile of the place's own tiles (`worldmap.own_tiles`: its rectangle's tiles that `place_at` gives
   to it), picked by the id alone (`worldmap.slot`), so it never depends on who else is there. Two ids share a
   tile only when they differ by a multiple of the place's tile count. Nothing is stored for a villager, routes
@@ -198,7 +199,7 @@ is the dev/review tool until a game design says what divine power costs.
   bar, seeds 1 to 3 at 100 villagers over 3 days, log and every tick's state hash (tests/test_space.py).
 - `Sim.reach(a, b, t)`: at one place, or one of them in the open and their tiles at most 1 apart (Chebyshev).
   `Sim.sees(a, b, t)`: at one place, or one of them in the open and at most 6 apart. Two places hide each other.
-  The inhabitant view's `seen` and what it witnesses use `sees`. The player's acts still need the target at
+  The inhabitant view's `seen` and what it witnesses use `sees`. In space-1 the player's acts still need the target at
   its place: reaching a walker in the open, and its stopping to listen, are reach-1, after time-1 (Steering
   2026-11-23 18:49Z), because a walker's position between ticks can't be played before acts carry a time.
 - A walk sets out from the tile the body stands on (its slot, until it has walked), not from the anchor.
@@ -256,6 +257,48 @@ is the dev/review tool until a game design says what divine power costs.
   the talk path's order of events, not a small PR, and it belongs with the text thread's work.
 - The player and mind twin bar (an act and a mind's intent of the same shape resolve the same) now holds at
   the fixed point, where a mind's intent resolves: tests compare the act sent as a late act.
+- A world with no player writes engine 38's log (the no-player bar).
+
+## Reaching across open ground (reach-1, plan/v0-contracts-spec.md B1.1, B1.3, B1.4, B2.4)
+Steering ruled each point on 2026-11-23 (20:24Z, 20:26Z, 20:39Z).
+- **A body is seen one tick behind its route.** A route's `depart` and `arrive` are the ticks the engine's
+  step moves it, and the step for tick t runs at the end of t's window, so a walk that leaves in step t is
+  walked during window t + 1. `Sim.pos(a, t)` is therefore the route at `t - 1`: a walk of n ticks is seen
+  over n windows from its start to its destination, and the walker stands on the destination from its
+  arrival step. Before this a walker was shown a tick ahead, and a walk of one tick was never seen on the
+  road. It is a derived position only: nothing stored or logged moves, and reach, sight, the view, the
+  client's drawing, `world_model.gd`, the page viewer and the playback check all read this one convention.
+- **`Sim._near(a, b)`** is what the player's acts ask in place of "at one place": when one of the two is the
+  possessed body, `Sim.reach` at the act's own time (one place, or one of them in the open and their tiles
+  at most a tile apart); between two villagers, `_together`, as ever. It stands at the nine sites that asked
+  for one place: asks, kin asks, theft, gifts and seeking (`REACH_STEPS`), talk and its limit, a held ask and
+  its answer, and a line said. A body told to give to someone already in reach stays where it stands.
+- **The offer names those in reach.** `Sim._view(a, occupancy, reach=True)` adds, for the possessed body,
+  those within a tile of it across open ground, so the view's `offer` names them and the engine accepts them.
+- **`hail {target}`**, the player's alone, cost 0, no words, no mind call: a villager walking by within
+  sight (6 tiles) at the act's time stops where it is. Refused `"target not in sight"`, or `"not walking"`
+  for one at a place or already at its destination's anchor. A walker with an errand of its own stops too
+  and keeps the errand. One already stopped answers `"already stopped"` and gains no time.
+- **A halt re-bases the route**, with no new state: `from` becomes the tile the walker stands on, `depart`
+  the tick its wait ends (less one, by the convention above), `arrive` follows. A `halt` rule event
+  `{pos, place, depart, arrive}` cites its cause and tells a reader of the log where it stands and until
+  when. The wait is `LISTEN_TICKS` (3), started again by each line said to it and by each act of the
+  player's on it from within reach (asks, theft, gifts), never by another hail. Its answer to a line works
+  as at a place: stay keeps it standing for the occasion's time, leave sets it off at once (an `activity`
+  event with its `from`).
+- **Words need the same place or reach.** An inhabitant gets the full event only from someone at its place
+  or in reach. From someone in sight and no nearer it gets `inhabitant.SIGHT`'s fields: that it set out,
+  arrived or stopped, and that it spoke or answered and to whom, with no text. In the view's `seen`, `asleep`
+  shows only for those in reach (`reach: true`). This is view-side: the log is unchanged.
+- **Who walks past.** Where every walker will be until the next step is already fixed, so the view lists in
+  `seen` each walker that is in sight at some time in the coming tick, with `in` (the span of the tick it is
+  in sight for, in 600ths) and `track` (the tiles it is seen on then, about a tile apart). Nothing of it is
+  told outside that span. `offer.hail` names those of them the body can call to. Without this a walker that
+  crosses the body's sight inside one tick, 12 tiles of a 40-tile tick, would never be listed.
+- **Third parties in the open are unchanged** (sight-1, later): a line in the open is heard by its listener.
+- The log-only presence check follows bodies from the log (`invariants.Bodies`): an act of the player's with
+  one party in the open must be within reach at its time (sight for a hail), and a `halt` must be of a
+  walker on the tile its route puts it on.
 - A world with no player writes engine 38's log (the no-player bar).
 
 ## Bars (the build must pass these before review)

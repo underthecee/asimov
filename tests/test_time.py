@@ -28,7 +28,7 @@ from asiimov.events import Event, read_jsonl
 from asiimov.invariants import Checker, state_violations
 from asiimov.minds import StubMind
 from asiimov.replay import replay
-from asiimov.sim import ANSWER_ACTS, COST, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SUB, TICKS_PER_DAY, WALK_ACTS, Sim, act_cost
+from asiimov.sim import ANSWER_ACTS, COST, GO_ACTS, HAIL_ACTS, PLAYER_ACTIONS, SAY_ACTS, SUB, TICKS_PER_DAY, WALK_ACTS, Sim, act_cost
 from asiimov.worldmap import WALK, bounds, distance, on_map, own_tiles, place_at
 from test_inhabitant import batch_of, intent
 from test_live import WS
@@ -194,7 +194,7 @@ def small_act(rng, sim, agents):
         act["place"] = rng.choice(sorted(sim.map["places"]))
     elif action in SAY_ACTS:
         act.update(target=rng.randrange(agents), text="Good day to you.")
-    elif action in ANSWER_ACTS or rng.random() < 0.8:
+    elif action in ANSWER_ACTS + HAIL_ACTS or rng.random() < 0.8:
         act["target"] = rng.randrange(agents)
     return act
 

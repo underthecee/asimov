@@ -132,3 +132,13 @@ def position(route: dict, anchor_to, tick: int) -> list[int]:
     dy = min(left - dx, abs(ty - y))
     y += dy if ty >= y else -dy
     return [x, y]
+
+
+def tile_at(route: dict, anchor_to, n: int, sub: int) -> list[int]:
+    """The tile a walker on `route` stands on at time n/sub ticks: the floor of position() there, in whole
+    numbers (the core has no floats or fractions)."""
+    (x, y), (tx, ty) = route["from"], anchor_to
+    left = WALK * max(0, n - route["depart"] * sub)  # in tiles times sub
+    dx = min(left, abs(tx - x) * sub)
+    dy = min(left - dx, abs(ty - y) * sub)
+    return [(x * sub + (dx if tx >= x else -dx)) // sub, (y * sub + (dy if ty >= y else -dy)) // sub]
