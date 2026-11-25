@@ -231,7 +231,8 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "43": "65a001f4eb0aad046fd054a2418cf295d5c490b0d3a150ce423eaba55fa69f0d",  # reach-1 (#115), reach is by tile and a walker can be hailed to stop; no player: only the engine field differs
           "verbs-1": "c979925fc91b0fec8d2b97a82caf49b51ab61cb926e73213b318d2f0e41be138",  # verbs-1: every verb is one row of a table the engine's lists, menu, cost and dispatch read, on reach-1, before its number; a pure move: only the engine field differs (tests/test_verbs.py holds that with a player too)
           "44": "4ad8b46ce9d32590505fe90edb5e5f85e4986e2498c12b28f5a22cf311ae4d7f",  # verbs-1 (#116), one table of verbs, a pure move; the log and every prompt differ from 43 only in the engine field
-          "things-1": "a432d8d9e4838e611201c3539c313d0b6eeba64897151516bbb2338d96001dce"}  # things-1: unique things in one ledger for a world whose stakes hold `things`, from its first possess, on verbs-1, before its number; without the stake or a player: only the engine field differs
+          "things-1": "a432d8d9e4838e611201c3539c313d0b6eeba64897151516bbb2338d96001dce",  # things-1: unique things in one ledger for a world whose stakes hold `things`, from its first possess, on verbs-1, before its number; without the stake or a player: only the engine field differs
+          "45": "f2834991d8139a7c39f8243d51bebc431d48b5d23c5a2bb25de6fe39d8ed8dc9"}  # things-1 (#118), the same world as 44 with no player, engine field aside: things are made at the first possess, in a world started with --things
 
 
 def test_log_changes_bump_the_engine_version():
