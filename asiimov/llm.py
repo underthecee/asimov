@@ -14,15 +14,15 @@ import urllib.request
 from .memory import GIVES_ANSWER_LINE, prompt_hash
 from .minds import MindReply, MindRequest
 from .sim import ACTIVITIES as _ACTIVITIES, SAYS_NEXT, STEP_DOS
+from .verbs import NO_TARGET, PERSON_ACTIONS
 
 ACTIVITIES = list(_ACTIVITIES)
 
-NO_TARGET = ["buy_food", "go_market", "work", "socialize", "home", "rest", "explore", "wait"]
 # Person actions and the ids each may name: family here for ask_kin (the map's place check), people here
 # for ask_food, buy_from and steal, and anyone the prompt lists (family, here, People I know) for the rest.
 # A deliberation's view "offer" (engine 10) cuts both lists to what can work now.
-PERSON_ACTIONS = (("ask_kin", "kin_here"), ("ask_food", "present"), ("buy_from", "present"), ("steal", "present"),
-                  ("give_food", "people"), ("give_coin", "people"), ("seek", "people"), ("avoid", "people"))
+# verbs-1: both lists are read from the verb table (NO_TARGET: the menu's rows that name nobody; PERSON_ACTIONS:
+# those that name a person, each with its row's `among`).
 
 # No maxLength on strings: vLLM 0.11 structured outputs (xgrammar) decode ~15x slower with it
 # (measured on Qwen3-4B, A6000: reflect 18.5 s vs 1.7 s). max_tokens bounds the reply and the

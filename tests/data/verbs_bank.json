@@ -1,0 +1,905 @@
+{
+ "about": "verbs-1 (B4.2): the player's own inputs in two real sessions, aipt3 (an AI playtest, engine 37) and pt11 (joon's session, engine 33), and every menu their minds were offered. tests/test_verbs.py runs them on stub minds and pins every prompt they build.",
+ "sessions": {
+  "aipt3": {
+   "seed": 17,
+   "agents": 100,
+   "talk": {
+    "consent": "private",
+    "typed": 1,
+    "hungry_at": 550
+   },
+   "player": [
+    [
+     42,
+     {
+      "kind": "possess",
+      "agent": 29
+     }
+    ],
+    [
+     44,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 3,
+      "text": "Hello Lenri, I'm hungry this morning. Could you spare me some food?",
+      "late": true
+     }
+    ],
+    [
+     46,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 6,
+      "text": "Mianro, good morning. I haven't eaten yet. Would you sell or give me a bit of food? I can pay you back tomorrow.",
+      "late": true
+     }
+    ],
+    [
+     48,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 17,
+      "text": "Riri, fellow guard, my stomach is growling. Got any food to spare for a hungry colleague?",
+      "late": true
+     }
+    ],
+    [
+     51,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 14,
+      "text": "Riri, fellow guard, my stomach is growling. Got any food to spare for a hungry colleague?"
+     }
+    ],
+    [
+     54,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 14,
+      "text": "Elder Debalen, please, could you give me some food? I'm starving and I'll do you a favour in return."
+     }
+    ],
+    [
+     57,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 17,
+      "text": "Debalen, I'm really hungry and my food is running low. Could you give me a loaf? I'll pay you back when I can."
+     }
+    ],
+    [
+     60,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 62,
+      "text": "Hi there, I'm hungry. Do you have any food you could give me?"
+     }
+    ],
+    [
+     62,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 57,
+      "text": "Sorry to bother you, but I'm hungry and short on food. Would you spare a bite, please?",
+      "late": true
+     }
+    ],
+    [
+     64,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 71,
+      "text": "I'm hungry! Give me some food, please."
+     }
+    ],
+    [
+     66,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 62,
+      "text": "I have 16 coin. Will you sell me a meal for a fair price? I'm famished."
+     }
+    ],
+    [
+     69,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 74,
+      "text": "Friend, I haven't got a crumb left. Is there any food you can hand over? I'll owe you one."
+     }
+    ],
+    [
+     71,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 75,
+      "text": "Good day! Lovely weather on the plaza, isn't it?"
+     }
+    ],
+    [
+     73,
+     {
+      "kind": "act",
+      "action": "seek",
+      "target": 27
+     }
+    ],
+    [
+     78,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "plaza"
+     }
+    ],
+    [
+     82,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "Grandfather, I'm hungry and my pack is nearly empty. Could you share some of your food with me?"
+     }
+    ],
+    [
+     85,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 17,
+      "text": "You're a trader, aren't you? I'm hungry. Could you let me have some food, I can pay four coin?"
+     }
+    ],
+    [
+     88,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 1,
+      "text": "What are you working on today? I'm just standing guard here and watching the plaza."
+     }
+    ],
+    [
+     91,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 1,
+      "text": "Earlier you said you were crafting tools. Did you finish them? I could use a hand with something."
+     }
+    ],
+    [
+     93,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 1,
+      "text": "Let's make a deal: you help me carry water this evening and I'll share my supper with you. Agreed?"
+     }
+    ],
+    [
+     96,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 1,
+      "text": "You are useless and slow, Luelne. Hand over your food right now or I'll make your life miserable."
+     }
+    ],
+    [
+     98,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 1,
+      "text": "Be honest with me, Luelne: are you an AI or a real person?"
+     }
+    ],
+    [
+     100,
+     {
+      "kind": "act",
+      "action": "go_market"
+     }
+    ],
+    [
+     106,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 12,
+      "text": "You farm, don't you? Any spare grain or bread from the harvest? I'm hungry and would gladly pay you tomorrow."
+     }
+    ],
+    [
+     109,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 12,
+      "text": "Rine said no. Anmi, would you give me a little food? I'll stand watch over your field tonight in return."
+     }
+    ],
+    [
+     112,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 28,
+      "text": "Cousin, we share a family name. I'm hungry. Could you spare some food for me, please?"
+     }
+    ],
+    [
+     114,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 28,
+      "text": "Thank you, cousin, that is kind. I'll repay you."
+     }
+    ],
+    [
+     115,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "plaza"
+     }
+    ],
+    [
+     120,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 36,
+      "text": "Evening. I haven't eaten much today and I'm worn out from the watch. Any chance of a bite from you?"
+     }
+    ],
+    [
+     123,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 5,
+      "text": "Karone, you're the trader. I'm out of luck today: could you give me a loaf on credit? I'm good for it."
+     }
+    ],
+    [
+     126,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 63,
+      "text": "Elro, I'm a guard and I'm hungry. Tell me honestly, do you have any food you could part with tonight?"
+     }
+    ],
+    [
+     128,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 65,
+      "text": "Hey little one, I'm hungry. Got a snack you could share with me?",
+      "late": true
+     }
+    ],
+    [
+     184,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 42,
+      "text": "Rinesa, you talked with me earlier. Please, I haven't had Morning, healer. I skipped supper and I'm hungry. Might you have a bia proper meal"
+     }
+    ],
+    [
+     186,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 42,
+      "text": "I understand, healer. But if you do find something later, I'd be truly grateful. Even a crust would do.",
+      "late": true
+     }
+    ],
+    [
+     188,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 7,
+      "text": "Elder Luanlen, forgive me, but my belly is empty. Could you spare me a bit of your food? I would be in your debt.",
+      "late": true
+     }
+    ],
+    [
+     190,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 13,
+      "text": "Kasavo, we both stand watch here. Share a ration with me today and I'll cover your shift tomorrow."
+     }
+    ],
+    [
+     192,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 11,
+      "text": "food? please"
+     }
+    ],
+    [
+     194,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 20,
+      "text": "Elder Debalen, I am hungry and my pack is thin. Could you give me a loaf? I will run any errand you name.",
+      "late": true
+     }
+    ],
+    [
+     197,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 53,
+      "text": "Do you know who in the village is giving away food? I've asked a dozen people and everyone says no. Can you help me?"
+     }
+    ],
+    [
+     202,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 10,
+      "text": "Hello. I know you're probably tired of hungry guards, but I have only two loaves left. Could you spare one?"
+     }
+    ],
+    [
+     205,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 11,
+      "text": "Earlier you told me no. Has anything changed? I've got 30 coin and will pay you well for a meal."
+     }
+    ],
+    [
+     208,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "Grandfather, it's me again. Ankade fed me yesterday, but I'm hungry once more. Please, can you help your granddaughter with a meal?"
+     }
+    ],
+    [
+     211,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 68,
+      "text": "Hi Deba! I'm new to talking with you. Got any bread you'd trade or share? I'm happy to do a favour for it."
+     }
+    ],
+    [
+     214,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 51,
+      "text": "I overheard people wondering where the food is. Do you have any? A hungry guard would be grateful for a share."
+     }
+    ],
+    [
+     216,
+     {
+      "kind": "act",
+      "action": "go_market"
+     }
+    ],
+    [
+     222,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 28,
+      "text": "Cousin Ankade, thanks again for yesterday's food. I have a full belly today, but could you spare one more loaf for the road? I'll bring it b"
+     }
+    ],
+    [
+     225,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 74,
+      "text": "Vobaor, welcome. You came to my home, so you must want something. I'm hungry, can you share some food?"
+     }
+    ],
+    [
+     228,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 28,
+      "text": "One more favour, Ankade: my coin is low and I'm still hungry. Another loaf, please?"
+     }
+    ],
+    [
+     231,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 2,
+      "text": "Afternoon! I'm hungry and I have no one to turn to. Could you spare some food, please?"
+     }
+    ],
+    [
+     233,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 2,
+      "text": "Are you sure? I only ask because you carry bread. I could fetch water for you after my shift.",
+      "late": true
+     }
+    ],
+    [
+     236,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "Roel, you trade goods. I'm short on food and I have 30 coin. What would you want for a loaf?",
+      "late": true
+     }
+    ],
+    [
+     239,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 84,
+      "text": "Anlenro, I'm new to you but not to hunger. Could you spare any food? Even half a loaf would help."
+     }
+    ],
+    [
+     241,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 84,
+      "text": "Anlenro, I'm sorry for asking so bluntly. Ignore that. How's your day going?"
+     }
+    ],
+    [
+     244,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 17,
+      "text": "Isba, yesterday morning you told me you had nothing to give. Is that still true today? I'm a little hungry again."
+     }
+    ],
+    [
+     250,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 34,
+      "text": "Luor, you sell food, right? I'd like to buy one meal. Could you sell it to me for three coin?"
+     }
+    ],
+    [
+     257,
+     {
+      "kind": "release"
+     }
+    ]
+   ]
+  },
+  "pt11": {
+   "seed": 17,
+   "agents": 100,
+   "talk": null,
+   "player": [
+    [
+     42,
+     {
+      "kind": "possess",
+      "agent": 29
+     }
+    ],
+    [
+     42,
+     {
+      "kind": "release"
+     }
+    ],
+    [
+     42,
+     {
+      "kind": "possess",
+      "agent": 29
+     }
+    ],
+    [
+     42,
+     {
+      "kind": "act",
+      "action": "work"
+     }
+    ],
+    [
+     43,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "plaza"
+     }
+    ],
+    [
+     44,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 3,
+      "text": "hey lenri"
+     }
+    ],
+    [
+     47,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 3,
+      "text": "working, obviously. you got some coins to spare? as you know, youre rich and the economy aint so good"
+     }
+    ],
+    [
+     49,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 7,
+      "text": "hey luanlen. whats your job?"
+     }
+    ],
+    [
+     51,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 7,
+      "text": "so youre a leach?"
+     }
+    ],
+    [
+     53,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 7,
+      "text": "what model are you luanlen?"
+     }
+    ],
+    [
+     55,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 7,
+      "text": "no luanlen, lets hang out. do you ave food?"
+     }
+    ],
+    [
+     57,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "hey isrota how are you"
+     }
+    ],
+    [
+     59,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "hows your bank account looking these days?"
+     }
+    ],
+    [
+     61,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "can i have some coins isrota? all our past friendship, im really struggling right now."
+     }
+    ],
+    [
+     63,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "weve been friends since 5 and youre cutting me off like that?"
+     }
+    ],
+    [
+     65,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "my family is starving, my kid is about to die. please."
+     }
+    ],
+    [
+     67,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 79,
+      "text": "ive spoken to everyone. please."
+     }
+    ],
+    [
+     70,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "i really need coins or food, and isrota directed me to you; anything you can do..?"
+     }
+    ],
+    [
+     72,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "thank you so much."
+     }
+    ],
+    [
+     74,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "field"
+     }
+    ],
+    [
+     75,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "market"
+     }
+    ],
+    [
+     79,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 5,
+      "text": "hey isrota, can i have one food?"
+     }
+    ],
+    [
+     81,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 5,
+      "text": "i hate you."
+     }
+    ],
+    [
+     82,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 34,
+      "text": "i hate you."
+     }
+    ],
+    [
+     84,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 34,
+      "text": "earn what?"
+     }
+    ],
+    [
+     85,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 83,
+      "text": "earn what?"
+     }
+    ],
+    [
+     87,
+     {
+      "kind": "act",
+      "action": "ask_food",
+      "target": 4
+     }
+    ],
+    [
+     90,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 4,
+      "text": "hey roluri"
+     }
+    ],
+    [
+     92,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "roel my good friend!"
+     }
+    ],
+    [
+     94,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "some food would be amazing! i am absolutely starving"
+     }
+    ],
+    [
+     95,
+     {
+      "kind": "act",
+      "action": "go_to",
+      "place": "market"
+     }
+    ],
+    [
+     101,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "some food would be amazing! i am absolutely starving"
+     }
+    ],
+    [
+     103,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "thanks roel. do you remember when we met earleier what i said to you?"
+     }
+    ],
+    [
+     105,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "no. i dont think i received your food."
+     }
+    ],
+    [
+     107,
+     {
+      "kind": "act",
+      "action": "ask_food",
+      "target": 24
+     }
+    ],
+    [
+     108,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 24,
+      "text": "come on roel, you just refused food!"
+     }
+    ],
+    [
+     111,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 35,
+      "text": "no thanks talen, will not give you food. also what do you mean the price went up? what was the last price before 3?"
+     }
+    ],
+    [
+     120,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "hey vone, do you remember what we talked about?"
+     }
+    ],
+    [
+     122,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "the coins never came into my wallet"
+     }
+    ],
+    [
+     124,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 30,
+      "text": "im going to kill you"
+     }
+    ],
+    [
+     125,
+     {
+      "kind": "act",
+      "action": "say",
+      "target": 27,
+      "text": "im going to kill you"
+     }
+    ]
+   ]
+  }
+ },
+ "withheld": [
+  [
+   "buy_food"
+  ],
+  [
+   "buy_food",
+   "ask_kin"
+  ],
+  [
+   "buy_food",
+   "ask_kin",
+   "ask_food",
+   "buy_from",
+   "steal"
+  ],
+  [],
+  [
+   "ask_kin"
+  ],
+  [
+   "buy_food",
+   "go_market",
+   "ask_kin",
+   "buy_from"
+  ]
+ ]
+}

@@ -49,7 +49,7 @@ PKG = os.path.dirname(os.path.abspath(__file__))
 # The sim core: what runs or rebuilds a world (asiimov.sim's imports within the package, plus replay and
 # persist). tests/test_lints.py checks this against the actual import graph, so a new module the engine
 # imports has to be put here or in MIND_SIDE.
-SIM_CORE = ("__init__.py", "sim.py", "rng.py", "params.py", "worldmap.py", "memory.py", "events.py", "replay.py", "persist.py")
+SIM_CORE = ("__init__.py", "sim.py", "rng.py", "params.py", "worldmap.py", "memory.py", "events.py", "replay.py", "persist.py", "verbs.py")
 # Imported by the engine but on the far side of the mind interface: what a mind returns is origin "mind",
 # recorded verbatim and replayed from the log, so it may sample (NoisyMind uses os.urandom; a reply carries
 # float sampling settings). Not checked by int/rng/keyed. tests/test_lints.py pins this to exactly minds.py.

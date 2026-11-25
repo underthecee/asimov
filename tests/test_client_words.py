@@ -1,7 +1,7 @@
 """Every outcome the engine can give a player's act reads as words in the client (readable-world C1).
 
 G5's play checklist, line 3: every act shows what happened and why, in words, refusals included. The
-client's Words.WHY (client/godot/scripts/inhabit_ui.gd) must word every `why` a receipt can carry. The
+client's Words.WHY (written to client/godot/scripts/verb_words.gd from the verb table) must word every `why` a receipt can carry. The
 engine's set is read from sim.py's source (a literal `why` passed to _receipt, or returned with an ok
 flag) and from a seeded session of random player acts, so a new `why` fails here until it's worded."""
 import ast
@@ -13,7 +13,7 @@ from asiimov import sim as S
 from asiimov.minds import StubMind
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GD = os.path.join(ROOT, "client", "godot", "scripts", "inhabit_ui.gd")
+GD = os.path.join(ROOT, "client", "godot", "scripts", "verb_words.gd")
 
 
 def client_whys() -> set[str]:
@@ -92,4 +92,4 @@ def test_the_scan_finds_the_engines_whys():
 
 def test_every_why_a_receipt_can_carry_is_worded_in_the_client():
     missing = (source_whys() | session_whys()) - client_whys()
-    assert not missing, f"add these to Words.WHY in inhabit_ui.gd: {sorted(missing)}"
+    assert not missing, f"add these to verbs.REASONS and run `python -m asiimov.verbs`: {sorted(missing)}"
