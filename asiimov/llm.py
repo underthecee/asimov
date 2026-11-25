@@ -7,6 +7,7 @@ world still validates every field and issues receipts, because a schema can't ch
 """
 import http.client
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -110,17 +111,25 @@ def schema_for(req: MindRequest) -> dict:
     return {"anyOf": branches}
 
 
+LANE_KINDS = ("plan", "reflect")  # the calls the plan lane holds back; the player's reply never waits on them
+
+
 class LLMMind:
     """Calls /v1/chat/completions. Thread-safe; keeps simple per-call stats for cost reports."""
 
     def __init__(self, base_url: str, model: str, temperature: float = 0.7, top_p: float = 0.9,
                  max_tokens: int = 200, timeout: float = 120.0, retries: int = 3, structured: bool = True,
-                 api_key: str | None = None, answer_first: bool = False):
+                 api_key: str | None = None, answer_first: bool = False, plan_lane: int = 0):
         self.base_url = base_url.rstrip("/")
         # pt11 (Steering 2026-11-18 23:52Z): a spoken answer waited behind the morning's plan calls. With a vLLM
         # server started with --scheduling-policy priority, answers go first (priority 0, the rest 1). The request
         # text is unchanged and this is not in `sampling`: the world log and replay don't see it.
         self.answer_first = answer_first
+        # The plan lane (Steering 2026-11-25 03:56Z, after aipt4's dawn): at most `plan_lane` plan and reflect calls
+        # are at the server at once; answer, decide and hear calls never wait for it. aipt4's dawn tail was 26
+        # plans decoding beside the player's reply. Timing only: replies apply in the engine's order, at the tick
+        # they are due, so the world log is the same with or without it. 0: no lane.
+        self._lane = threading.BoundedSemaphore(plan_lane) if plan_lane > 0 else None
         self.model = model
         self.temperature, self.top_p, self.max_tokens = temperature, top_p, max_tokens
         self.timeout, self.retries, self.structured = timeout, retries, structured
@@ -201,16 +210,25 @@ class LLMMind:
 
     def _ask(self, req: MindRequest) -> MindReply:
         body = self.body(req)
-        t0 = time.monotonic()
-        resp = self.post("/v1/chat/completions", body)
-        dt = time.monotonic() - t0
+        lane = self._lane if req.kind in LANE_KINDS else None
+        tq = time.monotonic()
+        if lane is not None:
+            lane.acquire()
+        try:
+            t0 = time.monotonic()
+            resp = self.post("/v1/chat/completions", body)
+            dt = time.monotonic() - t0
+        finally:
+            if lane is not None:
+                lane.release()
         choice = resp["choices"][0]
         text = choice["message"].get("content") or ""
         usage = resp.get("usage") or {}
         self.calls.append({"kind": req.kind, "latency_s": round(dt, 4),
                            "prompt_tokens": usage.get("prompt_tokens"),
                            "completion_tokens": usage.get("completion_tokens"),
-                           "finish_reason": choice.get("finish_reason")})
+                           "finish_reason": choice.get("finish_reason"),
+                           **({"lane_wait_s": round(t0 - tq, 4)} if lane is not None else {})})
         sampling = {"temperature": self.temperature, "top_p": self.top_p, "max_tokens": self.max_tokens,
                     "seed": body["seed"], "structured": self.structured}
         if "frequency_penalty" in body:

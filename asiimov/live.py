@@ -1171,6 +1171,9 @@ def main(argv=None):
     ap.add_argument("--answer-first", action="store_true",
                     help="llm mind: spoken answers ahead of plans (the model pod needs --vllm-args "
                          "'--scheduling-policy priority')")
+    ap.add_argument("--plan-lane", type=int, default=8,
+                    help="llm mind: at most this many plan and reflect calls at the model server at once; answers, "
+                         "decisions and hearings skip the lane (Steering 2026-11-25, aipt4's dawn). 0: no lane")
     ap.add_argument("--consent", choices=list(CONSENTS), default=None,
                     help="talk-1, a new world only: who answers a line said with a chip. nature (the default): "
                          "today's roll; mind: the villager's mind (a 32B session); private (text-1): the villager's "
