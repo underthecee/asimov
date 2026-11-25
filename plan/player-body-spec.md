@@ -301,6 +301,49 @@ Steering ruled each point on 2026-11-23 (20:24Z, 20:26Z, 20:39Z).
   walker on the tile its route puts it on.
 - A world with no player writes engine 38's log (the no-player bar).
 
+## One table of verbs (verbs-1, plan/v0-contracts-spec.md B4)
+A pure move: nothing a mind, a player or a rule can do changes, and the log and every prompt are
+byte-identical to reach-1's (only the engine field differs).
+- **`asiimov/verbs.py` holds `VERBS`**, one row a verb, 28 rows: the 16 a mind may choose, the player's
+  six (`agree`, `decline`, `go_to`, `say`, `walk`, `hail`), and the rules' six (`shop`, `trade` and the
+  neighbour's four answers). A row says who may use the verb (`who`: mind, player, rule), what it names
+  (`takes`: a person, a place, a tile, a line) and among whom a mind may name it (`among`), what it needs
+  (`needs`: awake, the body free, the cooldown, reach, sight, kin, the market, coin, food, an open ask, a
+  walker), its `cost` in sim-minutes of the body's time (1, or 0), how it runs (`kind`: at once, an
+  ask, a walk to someone, a hold, an activity, a walk to a place; `step`, its place in a plan), the `Sim`
+  method that carries it out (`handler`), every reason its receipt can carry (`reasons`), and its `words`.
+- **Read from the table:** the engine's lists (`DELIBERATE_ACTIONS`, `PLAYER_ACTIONS`, `ACTIVITIES`,
+  `PERSON_STEPS`, `STEP_DOS`, `INSTANT_STEPS`, `ASK_STEPS`, `RATED_ACTS`, `REACH_STEPS`, `RULE_STEPS`,
+  `GIFTS` and the four one-verb groups), the minds' menu (`ACTION_CLAUSES`, `action_clauses(price)`), the
+  reply schema's `NO_TARGET` and `PERSON_ACTIONS`, `act_cost`, and the dispatch of a mind's or a player's
+  act to its handler. `tests/test_verbs.py` holds each list to the literal it replaced, in its order.
+- **Words.** A row's words are the mind's menu line, the player's label and short label, what a watcher
+  sees it doing, how an ask reads to each side, a plan step and the narrator's line for each outcome
+  (`told`). `REASONS` words every `why` a receipt can carry, as the actor reads it and as the other side
+  does. `python -m asiimov.verbs` writes them to `client/godot/scripts/verb_words.gd`, which
+  `inhabit_ui.gd` loads in place of its own tables; `narrate.py` reads `told` and `SEEN`; and
+  `plan/ai-playtest.md` carries `verbs.player_list()`. Tests fail when the file or the doc is stale, when a
+  verb a mind may choose lacks a word, when a `why` in the source or in a random session lacks its words,
+  or when a receipt carries a `why` its row doesn't list.
+- **Needs are declared; the handlers still check.** Each handler keeps its own order of checks, because
+  the first failing check picks the receipt's `why` and a table-driven order would change which reason a
+  doubly-barred act gets, and so the log. The declared needs are tested against behaviour (busy inside a
+  cost, asleep, reach) and are what things-1 and deal-1 add rows against.
+- **The bank** (B4.2): `tests/data/verbs_bank.json` holds the player's own recorded acts and lines from
+  the aipt3 and pt11 sessions (seed, size and talk settings with them) and each set of verbs their minds'
+  menus left out. The sessions are replayed on stub minds, and each log, whose mind events carry every
+  prompt's hash, must hash to what reach-1 gave; so must every menu and schema text at three prices.
+  It also holds a world with no player (stub, seed 1, 100 villagers, 3 days, and the same world with one
+  forced sick case): a recording mind hashes every prompt the engine hands it, byte for byte, and both
+  hashes are reach-1's (Steering 2026-11-23 22:00Z, for goods-1 R6). The hashes are of the text the engine
+  builds for a real mind (`MindRequest.prompt`, and the log's `prompt_hash` of it); nothing in them is the
+  stub's, which only supplies the replies that move the world on.
+- **Left where they are**, as rules more than verbs: `TALK_BARRED`, `WAIT_STEPS`, `STEP_TICKS`, the sick
+  lists, `memory.E9_ACTIONS` (an old prompt's literal text), `inhabitant.SAYS_ACTS`, the stub minds'
+  lines, and the client's `Plan.ANYWHERE`, `Plan.WALK_FIRST` and `walk_keys.AFAR`.
+- **A new verb is a row**, its handler, and `python -m asiimov.verbs`; one a mind can choose also needs
+  its bank and bars (B7.2).
+
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical
    to the previous engine's apart from the genesis `engine` field, and the state hash at every

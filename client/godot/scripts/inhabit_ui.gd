@@ -3,72 +3,23 @@
 # them); it never decides anything, and an act is still the server's offer, sent as it is.
 extends RefCounted
 
-const VERB := {"work": "work", "shop": "shop", "socialize": "see people", "home": "go home", "rest": "rest",
-		"explore": "explore", "visit": "visit someone", "sleep": "sleep"}
-const ACTION := {"buy_food": "Buy food at the market", "go_market": "Go to the market", "ask_kin": "Ask %s (family) for food",
-		"ask_food": "Ask %s for food", "buy_from": "Buy food from %s", "steal": "Steal food from %s",
-		"give_food": "Give food to %s", "give_coin": "Give a coin to %s", "seek": "Go and find %s",
-		"avoid": "Keep away from %s", "work": "Go to work", "socialize": "Go and see people", "home": "Go home",
-		"rest": "Rest", "explore": "Explore", "wait": "Wait", "agree": "Say yes to %s", "decline": "Say no to %s",
-		"hail": "Call out to %s"}  # reach-1: someone walking by stops and waits for you
-const NOW := {"work": "Working", "shop": "Shopping", "socialize": "Seeing people", "home": "Staying",
-		"rest": "Resting", "explore": "Exploring", "visit": "Visiting"}
-const SHORT := {"ask_kin": "ask family for food", "ask_food": "ask for food", "buy_from": "buy food", "steal": "steal food",
-		"give_food": "give food", "give_coin": "give a coin", "seek": "go to them", "avoid": "keep away",
-		"agree": "give", "decline": "not now", "say": "say something",  # talk-1: an ask's two chips
-		"hail": "call out"}
-const DOING := {"buy_food": "buy food", "go_market": "go to the market", "ask_kin": "ask family for food",
-		"ask_food": "ask for food", "buy_from": "buy food", "steal": "steal", "give_food": "give food",
-		"give_coin": "give a coin", "seek": "find someone", "avoid": "keep away", "work": "go to work",
-		"socialize": "see people", "home": "go home", "rest": "rest", "explore": "explore", "wait": "wait",
-		"agree": "say yes", "decline": "say no", "say": "say something", "hail": "call out to"}
-const WHY := {"heading to market": "you head to the market", "started": "you start", "waited": "you wait",
-		"said": "they heard you",
-		"not in talk": "goods don't change hands in talk",
-		"bought": "you buy %d food", "had enough": "you have enough food, so you buy none",
-		"not at market": "you aren't at the market", "not kin": "they aren't family",
-		"one act per tick": "one line at a time; your first one was said",
-		"busy": "you're still busy with the last thing; try again in a moment",
-		"going to see them": "you go to see them", "taking them something": "you take them something",
-		"keeping away": "you keep away", "carrying on": "you carry on",
-		"supplied": "you buy what your work needs",
-		"not offered": "it wasn't possible any more by the time it came up",
-		"cooldown": "too soon after your last ask; wait a little", "unknown target": "they aren't here any more",
-		"target not here": "they aren't here any more", "target asleep": "they're asleep",
-		"target has no food": "they have no food", "kin has nothing to spare": "they have nothing to spare",
-		"kin gave food": "they gave you food", "kin refused": "they refused", "no coin": "you have no coin",
-		"nothing to spare": "they have nothing to spare", "refused": "they refused", "sold": "they sold it to you",
-		"gave": "done", "stolen": "you got away with it", "caught": "you were caught",
-		"released": "you let go of the villager first", "stays home sick": "you stay home sick",
-		"works sick": "you work while sick", "said yes": "they get what they asked for",
-		"said no": "they're told no", "no ask": "they have no ask of you now", "not together": "you're no longer together",
-		"already asked": "they're still waiting for an answer", "asleep": "you were asleep",
-		"bedtime": "it's bedtime, so you head home", "falling asleep": "you're falling asleep",
-		"no food to give": "you have no food to give", "no coin to give": "you have no coin to give", "no stock": "the market has no food left",
-		"unparseable or unknown action": "that isn't something you can do",
-		"heading there": "you set off", "already here": "you're already there", "arrived": "you arrive",
-		"time ran out": "it took too long", "price changed": "the price changed; check it and offer again",
-		"hailed": "they stop and wait for you", "already stopped": "they're already waiting for you",
-		"not walking": "they aren't walking by", "target not in sight": "they're too far to hear you"}
-const TO_YOU := {"gave": "you gave them 1 food", "sold": "you sold them 1 food", "refused": "you said no",
-		"kin gave food": "you gave them food", "kin refused": "you said no", "stolen": "they stole food from you",
-		"caught": "you caught them stealing", "nothing to spare": "you had nothing to spare",
-		"kin has nothing to spare": "you had nothing to spare", "target asleep": "you were asleep",
-		"target not here": "you weren't there any more", "no coin": "they couldn't pay", "target has no food": "you had no food"}
+# verbs-1: the words for each verb and for each reason a receipt can carry are the verb table's
+# (asiimov/verbs.py), written out as verb_words.gd by `python -m asiimov.verbs`. Change them there.
+const VerbWords := preload("res://scripts/verb_words.gd")
+const VERB := VerbWords.VERB
+const ACTION := VerbWords.ACTION
+const NOW := VerbWords.NOW
+const SHORT := VerbWords.SHORT
+const DOING := VerbWords.DOING
+const WHY := VerbWords.WHY
+const TO_YOU := VerbWords.TO_YOU
 const ANSWERS := ["gave", "sold", "refused", "kin gave food", "kin refused"]  # an ask's yes or no
 # What a villager did with your own act aimed at them, by name (%s): the outcome first, then the why.
-const BY_THEM := {"refused": "%s said no.", "kin refused": "%s said no.", "nothing to spare": "%s had nothing to spare.",
-		"kin has nothing to spare": "%s had nothing to spare.", "kin gave food": "%s gave you food.",
-		"target asleep": "%s is asleep.", "target not here": "%s isn't here any more.",
-		"unknown target": "%s isn't here any more.",
-		"caught": "%s caught you stealing.", "stolen": "You stole food from %s and got away with it."}
-const ASKING := {"ask_kin": "You asked %s for food", "ask_food": "You asked %s for food", "buy_from": "You tried to buy food from %s",
-		"steal": "You tried to steal food from %s", "give_food": "You gave food to %s", "give_coin": "You gave a coin to %s"}
-const ASKED := {"ask_kin": "asked you for food", "ask_food": "asked you for food", "buy_from": "wanted to buy food from you",
-		"steal": "tried to steal from you", "give_food": "gave you food", "give_coin": "gave you a coin",
-		"seek": "came to see you"}
-const HERE_ONLY := ["ask_kin", "ask_food", "buy_from", "steal"]  # sim.INSTANT_STEPS: refused with the target elsewhere
-const RATED := ["ask_kin", "ask_food", "buy_from", "steal", "buy_food"]  # held to the cooldown (sim.RATED_ACTS)
+const BY_THEM := VerbWords.BY_THEM
+const ASKING := VerbWords.ASKING
+const ASKED := VerbWords.ASKED
+const HERE_ONLY := VerbWords.HERE_ONLY  # sim.INSTANT_STEPS: refused with the target elsewhere
+const RATED := VerbWords.RATED  # held to the cooldown (sim.RATED_ACTS)
 
 
 static func shown(item: Dictionary, present: Dictionary) -> bool:

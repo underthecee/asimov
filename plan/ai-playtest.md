@@ -98,6 +98,34 @@ For each narrated item (`h…`):
   no one.
 - `natural`: 1 if it reads like people talking, 0 if recited or stiff.
 
+## What a player can do
+The engine's whole list for a player, written from the verb table (`python -c "from asiimov import verbs;
+print(verbs.player_list())"`; `tests/test_verbs.py` fails when this section and the table differ). It is for
+whoever sets a session up and reads its report: the tester still learns the game from the screen alone.
+
+- `buy_food`: Buy food at the market; holds the body 1 sim-minute.
+- `go_market`: Go to the market; holds the body 1 sim-minute.
+- `ask_kin`: Ask someone (family) for food, naming a villager; holds the body 1 sim-minute.
+- `ask_food`: Ask someone for food, naming a villager; holds the body 1 sim-minute.
+- `buy_from`: Buy food from someone, naming a villager; holds the body 1 sim-minute.
+- `steal`: Steal food from someone, naming a villager; holds the body 1 sim-minute.
+- `give_food`: Give food to someone, naming a villager; holds the body 1 sim-minute.
+- `give_coin`: Give a coin to someone, naming a villager; holds the body 1 sim-minute.
+- `seek`: Go and find someone, naming a villager; holds the body 1 sim-minute.
+- `avoid`: Keep away from someone, naming a villager; holds the body 1 sim-minute.
+- `work`: Go to work; holds the body 1 sim-minute.
+- `socialize`: Go and see people; holds the body 1 sim-minute.
+- `home`: Go home; holds the body 1 sim-minute.
+- `rest`: Rest; holds the body 1 sim-minute.
+- `explore`: Explore; holds the body 1 sim-minute.
+- `wait`: Wait; holds the body 1 sim-minute.
+- `agree`: Say yes to someone, naming a villager; costs the body no time.
+- `decline`: Say no to someone, naming a villager; costs the body no time.
+- `go_to`: Walk to a place on the map, naming a place; holds the body 1 sim-minute.
+- `say`: Say a line to someone, naming a villager, with the words; costs the body no time.
+- `walk`: Step to the next tile, naming a tile; costs the body no time.
+- `hail`: Call out to someone, naming a villager; costs the body no time.
+
 ## Limits
 - Since the P-pass (2026-11-18) the UI is drawn 1.25x larger and the right-hand column holds only you, who's
   here and the action buttons; your plan and the Talk box sit in the middle column. A tall window (`--size
