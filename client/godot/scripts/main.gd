@@ -570,6 +570,9 @@ func _on_ack(m: Dictionary) -> void:
 		if pending.get("step", false):
 			plan_act = int(m["event"])
 			_take_receipts(client.seen_events.filter(func(e): return int(e["tick"]) >= int(pending["tick"])))
+		elif _answered(int(m["event"])):
+			pending = {}  # time-1b: it landed as it arrived, its receipt ahead of this ack; the next act can go now
+			_refresh_inhabit()
 	elif m["status"] == "rejected" and pending.get("id") == m["id"]:
 		_append(ui["feed"], "[color=#e07070]Not sent: %s (%s).[/color]\n" % [pending["label"], m.get("reason", "")])
 		if pending.get("step", false):
@@ -578,6 +581,18 @@ func _on_ack(m: Dictionary) -> void:
 			_return_line(int(pending["say_to"]))
 		pending = {}
 		_refresh_inhabit()
+
+
+func _answered(act: int) -> bool:
+	## Whether the receipt for this act of ours is already here (time-1b: every act but a line lands at once).
+	var evs: Array = client.seen_events
+	for i in range(evs.size() - 1, max(evs.size() - 33, -1), -1):
+		var e: Dictionary = evs[i]
+		if e["kind"] == "receipt" and not e["parents"].is_empty() and int(e["parents"][0]) == act:
+			return true
+		if int(e["id"]) < act:
+			break
+	return false
 
 
 func _take_receipts(evs: Array) -> void:

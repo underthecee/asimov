@@ -9,7 +9,13 @@ it arrives (Sim.take): the action is recorded then and a walk moves the body the
 taken, so a batch run of the same schedule writes the same log. A walk never pulls a tick forward.
 
 The no-player bar is tests/test_space.py's, unchanged: no hash there moved. Walks on whole ticks move as
-walk-1's did, which tests/test_walk.py holds, unchanged but for the one line on pulling."""
+walk-1's did, which tests/test_walk.py holds, unchanged but for the one line on pulling.
+
+time-1b (B2.3): every act but a line said lands the moment it is recorded, judged where the body stands and by
+who is there then, with its receipt at once, and holds the body for its cost (a sim-minute until verbs-1's
+table; an answer to an ask costs nothing). An act that finds the body still held is refused as "busy", which
+replaces the tick's one act; the runner stamps an act that arrives while the body is held at the moment it is
+free, so it lands. A line said keeps its tick's fixed point, one line a tick (the fallback this step names)."""
 import asyncio
 import json
 import os
@@ -22,7 +28,7 @@ from asiimov.events import Event, read_jsonl
 from asiimov.invariants import Checker, state_violations
 from asiimov.minds import StubMind
 from asiimov.replay import replay
-from asiimov.sim import SUB, TICKS_PER_DAY, Sim
+from asiimov.sim import ANSWER_ACTS, COST, GO_ACTS, PLAYER_ACTIONS, SAY_ACTS, SUB, TICKS_PER_DAY, WALK_ACTS, Sim, act_cost
 from asiimov.worldmap import WALK, bounds, distance, on_map, own_tiles, place_at
 from test_inhabitant import batch_of, intent
 from test_live import WS
@@ -180,6 +186,19 @@ def test_a_walk_never_moves_the_body_faster_than_walking_speed(seed):
 
 
 # ------------------------------------------------------------------ applied as it arrives (Sim.take)
+def small_act(rng, sim, agents):
+    """Any act a player may send but a walk, with what it needs."""
+    action = rng.choice([a for a in PLAYER_ACTIONS if a not in WALK_ACTS])
+    act = {"kind": "act", "action": action}
+    if action in GO_ACTS:
+        act["place"] = rng.choice(sorted(sim.map["places"]))
+    elif action in SAY_ACTS:
+        act.update(target=rng.randrange(agents), text="Good day to you.")
+    elif action in ANSWER_ACTS or rng.random() < 0.8:
+        act["target"] = rng.randrange(agents)
+    return act
+
+
 def random_tick(rng, sim, agents):
     """One tick's player acts at rising sim-seconds: walks, and now and then another act."""
     x0, y0, x1, y1 = bounds(sim.map)
@@ -189,13 +208,8 @@ def random_tick(rng, sim, agents):
         ax, ay = rng.choice(anchors)
         to = rng.choice(([rng.randint(x0, x1), rng.randint(y0, y1)], [ax + rng.randint(-3, 3), ay + rng.randint(-3, 3)]))
         act = walk(*to) if on_map(sim.map, to) else walk(ax, ay)
-        if rng.random() < 0.25:
-            action = rng.choice(("rest", "work", "wait", "go_market", "explore", "go_to", "give_food", "ask_food"))
-            act = {"kind": "act", "action": action}
-            if action == "go_to":
-                act["place"] = rng.choice(sorted(sim.map["places"]))
-            elif action in ("give_food", "ask_food"):
-                act["target"] = rng.randrange(agents)
+        if rng.random() < 0.3:
+            act = small_act(rng, sim, agents)
         acts.append(at(act, f))
     return acts
 
@@ -232,6 +246,11 @@ def test_taking_actions_as_they_arrive_writes_the_log_a_batch_run_writes_and_rep
     assert [e.to_json() for e in early.events] == [e.to_json() for e in batch.events]
     assert sum(e.kind == "moved" for e in early.events) > 40
     assert sum(e.kind == "act" and "f" in e.data for e in early.events) > 40
+    # time-1b (B2.7): small acts at random t are in it, more than one landing in a tick, and some finding the body held
+    acts_of = lambda e: early.events[e.parents[0]] if e.kind == "receipt" and e.parents and early.events[e.parents[0]].kind == "act" else None
+    landed = [acts_of(e).tick for e in early.events if acts_of(e) and e.data["ok"] and act_cost(e.data["action"])]
+    assert len(landed) > 15 and len(landed) > len(set(landed)), (len(landed), len(set(landed)))
+    assert any(acts_of(e) and e.data.get("why") == "busy" for e in early.events)
     events = [Event(**json.loads(e.to_json())) for e in early.events]
     assert replay(events).state_hash() == early.state_hash()
 
@@ -306,21 +325,23 @@ def test_a_walk_is_applied_and_answered_as_it_arrives_with_the_bodys_new_view(tm
     r.step()
     assert r.sim.tile(a) == frm and t + 1 == r.sim.state["tick"]
     t += 1
+    other = next(o["id"] for o in r.sim.state["agents"] if o["id"] != b)
     assert send(r, "w1", {"action": "walk", "to": outside}, 120) is None
-    assert send(r, "a1", {"action": "rest"}, 130) is None
+    assert send(r, "a1", {"action": "say", "target": other, "text": "Good day."}, 130) is None
     n = len(r.sim.events)
     (iid, ack, evs, view), = r.take_due()
     assert iid == "w1" and ack["status"] == "applied" and ack["tick"] == t and ack["event"] == n
     assert [e["kind"] for e in evs] == ["act", "moved"] and evs[1]["data"]["pos"] == outside
     assert r.sim.tile(a) == outside and a["place"] is None  # before the tick has run
     assert view == inhabitant.view(r.sim, b) and view["pos"] == outside and view["place"] is None and view["present"] == []
-    assert [e.kind for e in r.sim.events[n:]] == ["act", "moved", "act"]  # the rest is recorded, not yet resolved
+    assert [e.kind for e in r.sim.events[n:]] == ["act", "moved", "act"]  # the line is recorded, not yet resolved
     assert r.take_due() == []
     assert send(r, "w2", {"action": "walk", "to": frm}, 300) is None
     (iid2, ack2, evs2, view2), = r.take_due()
     assert iid2 == "w2" and view2["place"] == place and evs2[1]["data"]["place"] == place
     tick, events, acks = r.step()
     assert tick == t and [a["id"] for a in acks] == ["a1"]  # the walks were answered when they were taken
+    assert any(e.kind == "receipt" and e.parents[0] == n + 2 for e in events)  # the line, in its tick
     assert [e.id for e in events[:3]] == [n, n + 1, n + 2] and events[-1].id == len(r.sim.events) - 1
     side = [json.loads(l) for l in open(os.path.join(out, "runner.jsonl"))]
     assert [x["id"] for x in side if x["kind"] == "applied" and x.get("early")][-2:] == ["w1", "w2"]
@@ -343,6 +364,10 @@ def live_session(out, take: bool, seed=5):
             assert send(r, f"w{i}.{k}", {"action": "walk", "to": to if on_map(r.sim.map, to) else home}, f) is None
             if i % 7 == 0 and k == 0:
                 assert send(r, f"a{i}", {"action": "rest"}, f) is None
+            elif i % 3 == 0:  # time-1b: any small act, at this walk's moment (the runner lands it when the body is free)
+                args = {x: v for x, v in small_act(rng, r.sim, 12).items() if x != "kind"}
+                ack = send(r, f"a{i}.{k}", args, f)
+                assert ack is None or ack["status"] == "rejected", ack
             if take:
                 took = r.take_due()
                 early += len(took)
@@ -433,6 +458,168 @@ def test_a_finished_world_that_ended_on_taken_walks_is_extended_from_run_json(tm
     longer = read_jsonl(os.path.join(out, "events.jsonl"))
     assert [e.to_json() for e in longer[:len(events) - 1]] == [e.to_json() for e in events[:-1]]
     assert batch_of(out) == [e.to_json() for e in longer]
+
+
+# ------------------------------------------------------------------ time-1b: acts land at their own time (B2.3)
+def receipt_of(sim, eid):
+    return next(e for e in sim.events[eid + 1:] if e.kind == "receipt" and e.parents[0] == eid)
+
+
+def test_an_act_lands_the_moment_it_is_recorded_with_its_receipt_before_the_tick_runs():
+    sim, b = awake_body()
+    a, t = sim.state["agents"][b], sim.state["tick"]
+    eid = sim.take(at({"kind": "act", "action": "rest"}, 100))
+    r = sim.events[eid + 1]
+    assert (r.kind, r.parents, r.data["ok"], r.data["why"], r.tick) == ("receipt", [eid], True, "started", t)
+    assert a["override"]["do"] == "rest" and a["override"]["event"] == eid  # the step is set before the tick runs
+    assert sim.state["player"]["busy"] == t * SUB + 100 + COST
+    sim.step([at({"kind": "act", "action": "rest"}, 100)])
+    assert a["activity"] == "rest" and sim.state["tick"] == t + 1  # and it runs in that very tick
+    assert not state_violations(sim)
+
+
+def test_the_body_is_held_for_the_acts_cost_and_a_second_act_inside_it_is_busy():
+    sim, b = awake_body()
+    whys = []
+    for action, f in (("rest", 100), ("work", 100), ("work", 100 + COST - 1), ("work", 100 + COST),
+                      ("rest", 100 + COST + 1), ("decline", 100 + COST + 1)):
+        eid = sim.take(at({"kind": "act", "action": action, **({"target": 0} if action == "decline" else {})}, f))
+        whys.append(receipt_of(sim, eid).data["why"])
+    # held from 100 for a sim-minute; free again on the minute; an answer is never held (there was no ask)
+    assert whys == ["started", "busy", "busy", "started", "busy", "no ask"]
+    assert act_cost("say") == act_cost("agree") == act_cost("walk") == 0 and act_cost("buy_food") == COST == SUB // 10
+    n = len(sim.events)
+    sim.take(at(walk(0, 8), 100 + COST + 2))  # a walk isn't held either: walking speed bounds it
+    assert sim.events[n + 1].kind == "moved"
+
+
+def test_two_small_acts_in_one_tick_both_land_when_they_are_a_sim_minute_apart():
+    """B2.7: what was "one act per tick". Ten sim-minutes a tick, so up to ten acts, each in its own minute."""
+    sim, b = awake_body()
+    acts = [at({"kind": "act", "action": "rest" if k % 2 else "wait"}, k * COST) for k in range(SUB // COST)]
+    n = len(sim.events)
+    sim.step(acts)
+    mine = [e for e in sim.events[n:] if e.kind == "receipt" and e.actor == b]
+    assert [r.data["ok"] for r in mine] == [True] * 10 and not any(r.data["why"] == "busy" for r in mine)
+    sim.step([{"kind": "act", "action": "rest"}, {"kind": "act", "action": "work"}])  # the same instant: one lands
+    assert [e.data["why"] for e in sim.events if e.kind == "receipt" and e.actor == b][-2:] == ["started", "busy"]
+    assert not state_violations(sim)
+
+
+def test_a_sleeper_and_a_body_at_bedtime_are_told_so_at_once():
+    sim = Sim(4, 14, StubMind())
+    sim.step([{"kind": "possess", "agent": 3}])
+    a = sim.state["agents"][3]
+    assert a["asleep"]
+    eid = sim.take({"kind": "act", "action": "work"})
+    assert receipt_of(sim, eid).data["why"] == "asleep" and "busy" not in sim.state["player"]  # no act, no hold
+    sim.step([{"kind": "act", "action": "work"}])
+    while a["asleep"]:
+        sim.step([])
+    a["sleep_tick"] = sim.state["tick"]
+    eid = sim.take({"kind": "act", "action": "work"})
+    assert receipt_of(sim, eid).data["why"] == ("falling asleep" if a["place"] == a["home"] else "bedtime")
+
+
+def test_a_line_said_still_waits_for_its_tick_one_line_a_tick():
+    """The fallback time-1b names (B2.6): the talk path's timing is pinned from the tick a line lands in."""
+    sim, b = awake_body()
+    a = sim.state["agents"][b]
+    other = next(o["id"] for o in sim.state["agents"] if o["id"] != b and o["place"] == a["place"] and not o["asleep"])
+    say = lambda text, f: at({"kind": "act", "action": "say", "target": other, "text": text}, f)
+    acts = [at({"kind": "act", "action": "wait"}, 10), say("Good day.", 20), say("And again.", 30)]
+    n = len(sim.events)
+    ids = [sim.take(x) for x in acts]
+    assert [e.kind for e in sim.events[n:]] == ["act", "receipt", "act", "act"]  # the wait landed; the lines wait
+    sim.step(acts)
+    said = [e for e in sim.events[n:] if e.kind == "said"]
+    assert len(said) == 1 and said[0].parents[0] == ids[1] and said[0].id > ids[2]  # at the tick's fixed point
+    assert receipt_of(sim, ids[1]).data["ok"] and receipt_of(sim, ids[2]).data["why"] == "one act per tick"
+    assert not state_violations(sim)
+
+
+def test_an_act_is_answered_at_once_with_its_receipt_and_a_line_with_its_tick(tmp_path):
+    out = str(tmp_path / "w")
+    r, b = runner_with_body(out)
+    t = r.sim.state["tick"]
+    other = next(o["id"] for o in r.sim.state["agents"] if o["id"] != b)
+    assert send(r, "a1", {"action": "rest"}, 50) is None
+    assert send(r, "s1", {"action": "say", "target": other, "text": "Good day."}, 60) is None
+    assert send(r, "a2", {"action": "wait"}, 70) is None  # sent while the body is held: stamped when it is free
+    took = r.take_due()
+    assert [x[0] for x in took] == ["a1", "a2"]
+    for iid, ack, evs, view in took:
+        assert ack["status"] == "applied" and [e["kind"] for e in evs] == ["act", "receipt"] and evs[1]["data"]["ok"]
+        assert view["tick"] == t and view == inhabitant.view(r.sim, b) or iid == "a1"
+    assert [a.get("f") for a in r.run.player[t]] == [50, 60, 50 + COST]
+    tick, events, acks = r.step()
+    assert [a["id"] for a in acks] == ["s1"]  # the line is acked with its tick
+    r.finish()
+    log = read_jsonl(os.path.join(out, "events.jsonl"))
+    assert batch_of(out) == [e.to_json() for e in log] and replay(log).state_hash() == r.sim.state_hash()
+
+
+def test_an_act_sent_while_a_tick_runs_and_the_body_is_held_waits_and_lands_when_it_is_free(tmp_path):
+    out = str(tmp_path / "w")
+    r, b = runner_with_body(out)
+    t, got = r.sim.state["tick"], []
+    for iid, action in (("k1", "rest"), ("k2", "wait")):
+        r.queue_late(intent(iid, "act", {"action": action}, t), "c1", "inhabitant",
+                     lambda ack, evs, view, iid=iid: got.append((iid, ack, evs)), 12)
+    r.step()
+    (i1, ack1, evs1), (i2, ack2, _) = got
+    assert i1 == "k1" and ack1["tick"] == t and evs1[1]["data"]["ok"]  # joined the running tick, at its last second
+    assert r.sim.events[ack1["event"]].data == {"action": "rest", "f": SUB - 1, "late": True}
+    assert i2 == "k2" and ack2 is None  # the body was held: it waits for the next tick
+    assert r.run.player[t + 1] == [{"kind": "act", "action": "wait", "f": COST - 1}]  # when the body is free
+    (iid, ack, evs, _), = r.take_due()
+    assert iid == "k2" and ack["tick"] == t + 1 and evs[1]["data"] == {"action": "wait", "ok": True, "why": "waited"}
+    r.step()
+    r.finish()
+    assert batch_of(out) == [e.to_json() for e in read_jsonl(os.path.join(out, "events.jsonl"))]
+
+
+def test_with_no_pull_at_all_an_act_is_still_answered_at_once(tmp_path):
+    """Before time-1b an act waited for the next tick: 50 s at this pace with the pull off (tests/test_pull.py)."""
+    out = str(tmp_path / "w")
+    runner, b = runner_with_body(out)
+    runner.leave("c1")
+    runner.step()
+    got = []
+
+    async def main():
+        ready = asyncio.get_running_loop().create_future()
+        task = asyncio.ensure_future(live.serve(runner, port=0, tps=0.02, paused=True, pull_min=None,
+                                                started=lambda port, hub: ready.set_result(port)))
+        port = await ready
+        c = await WS.connect(port)
+        c.send({"type": "hello", "protocol": 3, "scope": "inhabitant", "agent": b})
+        await c.until("welcome")
+        god = await WS.connect(port)
+        god.send({"type": "hello", "protocol": 3})
+        await god.until("welcome")
+        god.send({"type": "control", "op": "run"})
+        seen = (await c.until("tick"))["view"]["tick"]
+        for k, action in enumerate(("rest", "wait", "work")):  # back to back: each lands when the body is free
+            c.send(intent(f"a{k}", "act", {"action": action}, seen))
+        for k in range(3):
+            got.append((await asyncio.wait_for(c.recv(), 3.0), await asyncio.wait_for(c.recv(), 3.0)))
+        assert runner.sim.state["tick"] == seen
+        god.send({"type": "control", "op": "pause"})
+        await god.until("status")
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(main())
+    for k, (early, ack) in enumerate(got):
+        assert early["type"] == "early" and [e["kind"] for e in early["events"]] == ["act", "receipt"], early
+        assert early["events"][1]["data"]["ok"] and "view" in early and ack["id"] == f"a{k}" and ack["status"] == "applied"
+    fs = [e["events"][0]["data"].get("f", 0) for e, _ in got]
+    assert fs[1] == fs[0] + COST and fs[2] == fs[1] + COST
+    runner.step()
+    runner.finish()
+    events = read_jsonl(os.path.join(out, "events.jsonl"))
+    assert batch_of(out) == [e.to_json() for e in events] and replay(events).state_hash() == runner.sim.state_hash()
 
 
 # ------------------------------------------------------------------ the hub: the clock's stamp, no pull for a walk

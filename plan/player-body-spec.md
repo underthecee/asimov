@@ -57,11 +57,14 @@ and replay holds by S2: player events are recorded inputs, like `fire`.
    aren't limited, since they roll nothing.
 
    **One act per body per tick** (`pending` holds one entry per agent). The first act in schedule order
-   is taken, and later ones that tick get `"one act per tick"`. If the body is asleep, on its bedtime
+   is taken, and later ones that tick get `"one act per tick"`. (time-1b: this now holds for a line said
+   only. Every other act lands the moment it is recorded and holds the body for its cost; one inside that
+   is refused `"busy"`. See "Small acts at their own time" below.) If the body is asleep, on its bedtime
    walk, or falling asleep at home that tick (the sleep branch, which files its reflection), the act
    gets a failed receipt: `"asleep"`, `"bedtime"` or `"falling asleep"`. An act queued before a
    `release` (or a `possess` that moves the body) in the same tick gets `"released"` at the release
-   and never resolves, so the freed mind is never asked about it (review of #39). No queued act ends a tick
+   and never resolves, so the freed mind is never asked about it (review of #39; from time-1b only a line
+   said is ever queued, and an act before a release in its tick has already landed). No queued act ends a tick
    without a receipt (S8). Queued acts never carry over to the next
    tick: the client resends after reading the receipt. Because every player event (fire, possess, act,
    release) is still emitted at the start of the tick in schedule order, live.py's slot-to-event
@@ -227,6 +230,33 @@ is the dev/review tool until a game design says what divine power costs.
   over actions taken ahead of their tick.
 - Still on the tick: every other act's outcome (time-1b lands the small ones at their t), minds, needs, the
   economy, villagers' arrivals. A world with no player writes engine 38's log (the no-player bar).
+
+## Small acts at their own time (time-1b, plan/v0-contracts-spec.md B2.3)
+- Every player act but a line said lands the moment it is recorded (`Sim._land`, from `Sim.take` between
+  ticks, from the step's first loop in batch and replay, and from `Sim.late_act` at a running tick's fixed
+  point). It is judged with who is where right then, and its receipt follows its `act` event at once. What it
+  starts (a trip, an ask a villager's mind must answer) still runs on the ticks after.
+- An act holds the body for its cost: `sim.COST`, one sim-minute (60 of the 600ths) for every act, and 0 for
+  a line said, an answer (agree, decline) and a walk (`sim.act_cost`), until verbs-1's table gives each verb
+  its own. `state.player.busy` is the time, in 600ths, the body is free again. An act that finds the body
+  held is refused `"busy"`. This replaces "one act per tick" for everything but words, so two acts a
+  sim-minute apart in one tick both land (B2.7).
+- A sleeper's act, or one at bedtime, is refused at once (`"asleep"`, `"bedtime"`, `"falling asleep"`), by the
+  same test the tick's sleep branch makes.
+- The live runner stamps an act with a cost at the moment the body is free, when it arrives sooner than
+  that, so it lands instead of being refused: a plan's steps sent back to back each land a sim-minute after
+  the last. There is no separate cap in real seconds: at the session's pace one sim-minute is 2 s, and a cap
+  that rejects would fail those steps and a walk sent on key release. An act that arrives in the last
+  sim-minute of a tick behind another is refused `"busy"`; one that arrives while a tick computes and finds
+  the body held waits for the next tick and lands at its free moment.
+- **Fallback (B2.6): a line said stays on the tick.** `say` is recorded as it arrives and resolved at the
+  tick's fixed point, one line a tick (`"one act per tick"` for a second), as before. Reason: the talk path
+  (text-1, think-1, apart-1, pace-2) times the villager's reply, the room's hearing and the pull of the
+  answering tick from the tick a line lands in, and 45 pinned tests hold those logs. Moving it is a change to
+  the talk path's order of events, not a small PR, and it belongs with the text thread's work.
+- The player and mind twin bar (an act and a mind's intent of the same shape resolve the same) now holds at
+  the fixed point, where a mind's intent resolves: tests compare the act sent as a late act.
+- A world with no player writes engine 38's log (the no-player bar).
 
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical

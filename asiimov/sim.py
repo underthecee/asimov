@@ -34,6 +34,7 @@ from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, plac
 
 TICKS_PER_DAY = 144
 SUB = 600  # time-1a (B2.1): an act's time inside its tick, f, counts 600ths of a tick, which are sim-seconds
+COST = SUB // 10  # time-1b (B2.3): what an act costs the body, one sim-minute, until verbs-1's table; words are free
 VILLAGE_WAKE_MIN = 390  # 06:30
 FOOD_PRICE = 3
 FARMER_SELL_PRICE = 2
@@ -284,6 +285,12 @@ WALK_ACTS = ("walk",)  # the player steps its body to a tile, at most WALK tiles
 PLAYER_ACTIONS = DELIBERATE_ACTIONS + ANSWER_ACTS + GO_ACTS + SAY_ACTS + WALK_ACTS  # what a player's act may name
 
 
+def act_cost(action: str) -> int:
+    """How long a player's act holds the body, in SUBths of a tick (time-1b, B2.3): COST for every act until
+    verbs-1's table, and nothing for words, an answer to an ask, or a walk (which walking speed bounds)."""
+    return 0 if action in SAY_ACTS + ANSWER_ACTS + WALK_ACTS else COST
+
+
 def action_clauses(price: int) -> dict:
     """ACTION_CLAUSES at a food price: the two clauses that name coin say the live price (B5 year-1)."""
     return {**ACTION_CLAUSES, "buy_from": f"buy_from offers a person here {price} coin for 1 food; they may say no",
@@ -309,7 +316,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "41"  # 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "42"  # 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -492,6 +499,7 @@ class Sim:
         self._window = None  # time-1a: the tick whose scratch above is open for player actions (see _begin)
         self._taken: list = []  # the tick's player actions applied before its step ran (take)
         self._f = 0  # the latest f among the tick's player acts: they apply in order of t (B2.1)
+        self._late = False  # time-1b: whether the act being applied joined a running tick at its fixed point
         self.expected = expected
         self.events: list[Event] = []
         self.metrics = {"activity": defaultdict(lambda: defaultdict(int))}
@@ -752,35 +760,29 @@ class Sim:
             if self.late_act(act) is None:
                 raise ValueError("a late act for a body whose mind is being asked belongs to the next tick")
 
-    def takes_late(self) -> bool:
+    def takes_late(self, act: dict | None = None) -> bool:
         """Whether a late act can join this tick: not while the possessed body's own mind request is in
-        flight (the idle hand-back), nor once it has taken its one act this tick (a plan's next step sent on
-        the last one's receipt), when it waits for the next tick."""
+        flight (the idle hand-back); nor a line once the body has said its line this tick; nor (time-1b) an
+        act that would find the body still held by the one before it (a plan's next step sent on the last
+        one's receipt). Then it waits for the next tick."""
         p = self.state.get("player")
-        return p is not None and p["agent"] not in self.pending and p["agent"] not in self._acted
+        if p is None or p["agent"] in self.pending:
+            return False
+        action = (act or {}).get("action")
+        if action in SAY_ACTS or act is None:
+            return p["agent"] not in self._acted
+        return not act_cost(action) or self.state["tick"] * SUB + act.get("f", 0) >= p.get("busy", 0)
 
     def late_act(self, act: dict) -> int | None:
         """A player act that arrived during this tick, applied at the fixed point (E4). Returns its event id,
         or None if it can't join (see takes_late), in which case nothing is logged."""
-        if not self.takes_late():
+        if not self.takes_late(act):
             if "player" not in self.state:
                 raise ValueError("act: no body is possessed")
             return None
         if act.get("kind") != "act":
             raise ValueError(f"only an act can arrive late, not {act.get('kind')!r}")
-        eid = self._player({k: v for k, v in act.items() if k != "late"}, late=True)
-        if act.get("action") in WALK_ACTS:
-            return eid  # walk-1: taken in _player; it is no deliberation and leaves the tick's one act free
-        a = self.state["agents"][self.state["player"]["agent"]]
-        why = self._branch.get(a["id"])
-        if why:
-            self._refuse_acts(a, why)
-        else:
-            self._player_deliberate(a, self._occupancy)
-            for aid, pend in list(self.player_pending.items()):
-                del self.player_pending[aid]
-                self._apply_act(self.state["agents"][aid], *pend)
-        return eid
+        return self._player({k: v for k, v in act.items() if k != "late"}, late=True)
 
     def _emit_mind(self, req: MindRequest, reply, data: dict, parents, prompt_tokens: int) -> int:
         return self._emit(f"mind_{req.kind}", "mind", req.agent_id, data, parents, mind={
@@ -2646,12 +2648,18 @@ class Sim:
             self._receipt(a, eid, action, False, why)
 
     def _player_deliberate(self, a: dict, occupancy: dict):
-        """The possessed body's in-the-moment decision, where a mind's deliberation would be filed. Its
-        view, situation and offer are a deliberation request's; it is applied in _commit, in _order."""
+        """The possessed body's line for this tick, where a mind's deliberation would be filed; it is applied
+        in _commit, in _order. Since time-1b only words wait for the tick like this (one line a tick): every
+        other act lands as it is recorded (_land)."""
         (eid, action, target), *rest = self._acts.pop(a["id"])
         self._acted.add(a["id"])
         for e2, a2, _ in rest:
             self._receipt(a, e2, a2, False, "one act per tick")
+        self._weigh(a, occupancy, eid, action, target)
+
+    def _weigh(self, a: dict, occupancy: dict, eid: int, action: str, target):
+        """A player act held to what a mind's deliberation would be held to: its view, situation and offer
+        are a deliberation request's. Leaves what to apply in player_pending, or a failed receipt."""
         if action in ANSWER_ACTS:  # held to no offer: an ask it can answer is checked in _answer
             self.player_pending[a["id"]] = (eid, action, target, list(ANSWER_ACTS), [target])
             return
@@ -2806,9 +2814,11 @@ class Sim:
         step's time (an activity's), unless another act replaces it. Its receipt says when it arrives, and
         a second receipt marks the arrival."""
         here, tick, r = a["place"] == place, self.state["tick"], a["route"]
-        # The walk starts on the next tick's _act, as every override's does, from where the body is then.
-        frm = self._pos(a) if r is None else position(r, self.map["places"][r["to"]]["anchor"], tick + 1)
-        arrive = tick if here else tick + 1 + travel_ticks(frm, self.map["places"][place]["anchor"])
+        # The walk starts on the body's next _act, as every override's does, from where the body is then: this
+        # tick's, for an act that landed before the tick ran (time-1b), or the next one's, for one that joined it.
+        start = tick + 1 if self._late else tick
+        frm = self._pos(a) if r is None else position(r, self.map["places"][r["to"]]["anchor"], start)
+        arrive = tick if here else start + travel_ticks(frm, self.map["places"][place]["anchor"])
         a["override"] = {"do": "go", "target": None, "place": place, "arrived": int(here), "event": eid,
                          "left": DEFAULT_STEP_TICKS}
         return self._receipt(a, eid, "go_to", True, "already here" if here else "heading there",
@@ -2918,7 +2928,10 @@ class Sim:
             if action in WALK_ACTS:  # walk-1: a step is taken as it's recorded, and isn't the tick's one act
                 self._walk(self.state["agents"][aid], eid, to, late, f)
                 return eid
-            self._acts.setdefault(aid, []).append((eid, action, target))
+            if action in SAY_ACTS and not late:  # words keep the tick's fixed point, one line a tick (see _land)
+                self._acts.setdefault(aid, []).append((eid, action, target))
+            else:
+                self._land(self.state["agents"][aid], eid, action, target, f, late)
             return eid
         if kind == "fire":
             fam = self.state["families"][act["family"]]
@@ -2931,6 +2944,47 @@ class Sim:
                 self._occasion(a, "fire", 900, event=eid)
             return eid
         raise ValueError(f"unknown player action {act['kind']}")
+
+    def _unable(self, a: dict) -> str | None:
+        """Why the body takes no act as it stands, between ticks: what the tick's own turn would find."""
+        if a["asleep"]:
+            return "asleep"
+        if self.state["tick"] >= a["sleep_tick"] or a["needs"]["fatigue"] >= 1000:
+            return "falling asleep" if a["place"] == a["home"] else "bedtime"
+        return None
+
+    def _land(self, a: dict, eid: int, action: str, target, f: int, late: bool):
+        """time-1b (B2.3): the act lands at its own time, t = tick + f/SUB, the moment it is recorded: judged
+        where the body stands and by who is there then, with its receipt at once. It holds the body for its
+        cost (COST; an answer to an ask costs nothing and is never held up), and an act that finds the body
+        still held is refused as "busy". This replaces the tick's one act for everything but words.
+
+        Fallback (B2.6): a line said (`say`) still lands at its tick's fixed point, one line a tick, where it
+        joins the talk path's own timing (the reply is asked for on the tick after its line; text-1, think-1,
+        apart-1 and pace-2 pin that). A line that arrives while a tick runs joins that tick here, as before."""
+        p, now = self.state["player"], self.state["tick"] * SUB + f
+        cost = act_cost(action)
+        why = self._branch.get(a["id"]) if late else self._unable(a)
+        if why:
+            return self._receipt(a, eid, action, False, why)
+        if cost and now < p.get("busy", 0):
+            return self._receipt(a, eid, action, False, "busy")
+        if cost:
+            p["busy"] = now + cost
+        if late:
+            occupancy = self._occupancy
+        else:  # who has arrived where, as the step will find them: walkers are nowhere
+            occupancy = defaultdict(list)
+            for o in self.state["agents"]:
+                if o["place"] is not None:
+                    occupancy[o["place"]].append(o["id"])
+        if action in SAY_ACTS:
+            self._acted.add(a["id"])  # its line for this tick
+        self._late = late
+        self._weigh(a, occupancy, eid, action, target)
+        pend = self.player_pending.pop(a["id"], None)
+        if pend is not None:
+            self._apply_act(a, *pend)
 
     def _awaits_answer(self, t: dict) -> bool:
         """Whether an ask aimed at `t` waits for the player's answer: t is the possessed body, not idle."""
