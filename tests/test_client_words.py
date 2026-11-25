@@ -82,6 +82,11 @@ def session_whys() -> set[str]:
                     act["thing"] = rng.randrange(40)
                     if act["action"] in S.HAND_ACTS:
                         act["target"] = rng.randrange(24)
+                elif act["action"] in getattr(S, "OFFER_ACTS", ()):  # deal-1: a trade, an ask or a gift, to anyone
+                    act.update(target=rng.randrange(24), give=rng.choice([{}, {"coin": 3}, {"food": 1}, {"coin": 40}]),
+                               want=rng.choice([{}, {"food": 1}, {"coin": 2}, {"food": 9}]))
+                    if not act["give"] and not act["want"]:
+                        act["want"] = {"food": 1}
                 elif rng.random() < 0.8:
                     act["target"] = rng.randrange(24)
                 acts = [act] * (2 if rng.random() < 0.05 else 1)

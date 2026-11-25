@@ -21,7 +21,8 @@ const ACTION := {
 		"wait": "Wait",
 		"agree": "Say yes to %s",
 		"decline": "Say no to %s",
-		"hail": "Call out to %s"}
+		"hail": "Call out to %s",
+		"offer": "Offer %s a trade"}
 const SHORT := {
 		"ask_kin": "ask family for food",
 		"ask_food": "ask for food",
@@ -34,7 +35,8 @@ const SHORT := {
 		"agree": "give",
 		"decline": "not now",
 		"say": "say something",
-		"hail": "call out"}
+		"hail": "call out",
+		"offer": "offer a trade"}
 const DOING := {
 		"buy_food": "buy food",
 		"go_market": "go to the market",
@@ -59,7 +61,8 @@ const DOING := {
 		"take": "pick it up",
 		"drop": "put it down",
 		"use": "use it",
-		"hand": "hand it over"}
+		"hand": "hand it over",
+		"offer": "offer a trade"}
 const ASKING := {
 		"ask_kin": "You asked %s for food",
 		"ask_food": "You asked %s for food",
@@ -161,7 +164,14 @@ const WHY := {
 		"not carried": "you aren't carrying it",
 		"no use": "there's nothing to do with it",
 		"not yours": "it isn't yours to use",
-		"target hands full": "their hands are full"}
+		"target hands full": "their hands are full",
+		"offered": "they heard your offer",
+		"not yours to offer": "you don't have what you offered",
+		"not theirs to give": "they don't have what you asked for",
+		"bad terms": "they want no dealings with you",
+		"too many offers": "they've heard enough offers from you today",
+		"already traded": "you've already made that trade with them today",
+		"gone": "you had walked away before they could answer"}
 const TO_YOU := {
 		"target not here": "you weren't there any more",
 		"target asleep": "you were asleep",
@@ -189,8 +199,9 @@ const BY_THEM := {
 		"caught": "%s caught you stealing."}
 const HERE_ONLY := ["ask_kin", "ask_food", "buy_from", "steal"]
 const RATED := ["ask_kin", "ask_food", "buy_from", "steal", "buy_food"]
-const PLAYER_ACTIONS := ["buy_food", "go_market", "ask_kin", "ask_food", "buy_from", "steal", "give_food", "give_coin", "seek", "avoid", "work", "socialize", "home", "rest", "explore", "wait", "agree", "decline", "go_to", "say", "walk", "hail", "take", "drop", "use", "hand"]
+const PLAYER_ACTIONS := ["buy_food", "go_market", "ask_kin", "ask_food", "buy_from", "steal", "give_food", "give_coin", "seek", "avoid", "work", "socialize", "home", "rest", "explore", "wait", "agree", "decline", "go_to", "say", "walk", "hail", "take", "drop", "use", "hand", "offer"]
 const THING_ACTS := ["take", "drop", "use", "hand"]
+const OFFER_ACTS := ["offer"]
 const THING_NAME := {
 		"berries": "the berry bush",
 		"flower": "the flower",

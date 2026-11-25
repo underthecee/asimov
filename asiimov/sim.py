@@ -32,7 +32,7 @@ from .params import generate_population
 from .rng import Rng
 from .things import DEFAULTS as THING_DEFAULTS, FIXTURES, GROWN, THINGS
 from .verbs import (ACTIVITIES, ANSWER_ACTS, ASK_STEPS, DELIBERATE_ACTIONS, GIFTS, GO_ACTS, HAIL_ACTS, HAND_ACTS, INSTANT_STEPS, MINUTE,
-                    PERSON_STEPS, PLAYER_ACTIONS, RATED_ACTS, REACH_STEPS, RULE_STEPS, SAY_ACTS, STEP_DOS, THING_ACTS, VERBS,
+                    OFFER_ACTS, PERSON_STEPS, PLAYER_ACTIONS, RATED_ACTS, REACH_STEPS, RULE_STEPS, SAY_ACTS, STEP_DOS, THING_ACTS, VERBS,
                     WALK_ACTS, cost as verb_cost, menu as verb_menu)
 from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, tile_at, travel_ticks
 
@@ -240,6 +240,108 @@ def decide_ask(name: str, move: str, price, think: int = 0) -> str:
     return f" {name} asks you for 1 of your food. Do you hand it to them now?{first} answer is your own choice: yes or no."
 
 
+# deal-1 (plan/v0-contracts-spec.md B5; Steering 2026-11-25 03:56Z, 04:00Z, 04:06Z): the player's keyed offer. An offer
+# is two sides, `give` (what the one who offers hands over) and `want` (what it asks of the other). A side holds
+# counts under "food" and "coin" and, under "things", the ids of unique things; in words and in a held decision its
+# things are their kinds. Nothing anyone typed is near it: the engine words both sides.
+# The world's rule settles it, never a mind (32B said yes to nearly any keyed trade whatever its price:
+# research/talk/deal-1-decide-registration.md): limits first, each a worded refusal with no roll and no call; nothing
+# wanted is a gift and moves at once; anything else is one roll on the receiver's nature when the offer lands, held
+# for the day per exact terms (a `decided` event). The receiver then answers aloud, its mind wording an answer that
+# is already made, and a yes is checked again, live, and moves both sides at once in one `deal`.
+OFFER_COUNTS = ("food", "coin")
+OFFER_MAX = 999        # the most of a count one side may name
+OFFER_THINGS = 8       # the most things one side may name
+OFFERS_PER_DAY = 3     # distinct decided offers one giver may put to one receiver in a day (B5.7)
+OFFER_KEEP_FOOD = 1    # food the receiver keeps after any trade that takes food from it
+OFFER_MIN_AFFINITY = -300  # a grudge below this takes no offer
+OFFER_WARMS = 50       # a yes warms the one who offered to the one who took it, as a yes to an ask does
+# Why an offer can't be settled when its answer is asked for, in the receiver's own prompt (TALK_WHY's manner): the
+# receipt's reason, as the limits name it, to the words after "as".
+# deal-1 (Steering 2026-11-25 04:50Z): no reason for an offerer who has gone. A villager doesn't speak to someone
+# who has left: no answer is asked for, and the deal says "gone" (Sim._offer_gone).
+OFFER_WHY = {"nothing to spare": TALK_WHY["food"], "bad terms": TALK_WHY["terms"],
+             "not yours to offer": "they no longer have what they offered",
+             "not theirs to give": "you no longer have what they want",
+             "target hands full": "your hands are full", "hands full": "their hands are full"}
+
+
+def offer_side_ok(side) -> bool:
+    """Whether `side` is one side of an offer as an act may carry it: {"food": n, "coin": n, "things": [ids]},
+    each part optional, a count from 1 to OFFER_MAX, the things distinct ids. {} is the empty side."""
+    if not isinstance(side, dict) or not set(side) <= {*OFFER_COUNTS, "things"}:
+        return False
+    th = side.get("things")
+    return all(_is_int(side[k]) and 1 <= side[k] <= OFFER_MAX for k in OFFER_COUNTS if k in side) and (
+        th is None or isinstance(th, list) and 0 < len(th) <= OFFER_THINGS
+        and all(_is_int(i) and i >= 0 for i in th) and len(set(th)) == len(th))
+
+
+def _things_words(kinds, yours: bool) -> list:
+    out = []
+    for kind in sorted(set(kinds)):
+        n = list(kinds).count(kind)
+        if yours:
+            out.append(f"your {kind}" if n == 1 else f"your {n} {kind}s")
+        else:
+            out.append(f"{'an' if kind[0] in 'aeiou' else 'a'} {kind}" if n == 1 else f"{n} {kind}s")
+    return out
+
+
+def offer_side(side: dict, yours: bool = False) -> str:
+    """One side of an offer in words: "6 coin", "2 food and a flower"; the listener's own: "1 of your food"."""
+    parts = [f"{side[k]} of your {k}" if yours else f"{side[k]} {k}" for k in OFFER_COUNTS if side.get(k)]
+    parts += _things_words(side.get("things", ()), yours)
+    assert parts, "an empty side has no words: a gift and a bare ask are worded by their own sentences"
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def carry_words(food: int, coin: int, things=()) -> str:
+    """What someone carries, as the prompts say it: "5 food and 30 coin", "5 food, 30 coin and a flower"."""
+    parts = [f"{food} food", f"{coin} coin"] + _things_words(things, False)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def offer_empty(side: dict) -> bool:
+    return not any(side.get(k) for k in OFFER_COUNTS) and not side.get("things")
+
+
+OFFER_CLOSE = " Nothing else changes hands in this talk, and nothing later."
+
+
+def offer_tail(who: str, give: dict, want: dict, family: str = "", choice: str = "") -> str:
+    """The answer's tail for a keyed offer: there is no line said, so nothing is quoted. The listener's answer is
+    already made (`choice`), and the words only speak it."""
+    said = (f" {who} asks you for {offer_side(want, yours=True)}." if offer_empty(give)
+            else f" {who} offers you {offer_side(give)} for {offer_side(want, yours=True)}.")
+    return said + (f" {who}'s family: {family}." if family else "") + " You answer them now." + choice + SAYS_NEXT
+
+
+def offer_choice(held: str | None, why: str | None, name: str, give: dict, want: dict, given: int, refused: int) -> str:
+    """What the listener's words go with: the answer its nature already gave this offer (`held`), or why nothing can
+    change hands (`why`, in TALK_WHY's manner). The words choose nothing."""
+    ask = offer_empty(give)
+    if why is not None:
+        text = (f" You can't give {name} that, as {why}." if ask else f" You can't make this trade, as {why}.") \
+            + " Tell them no."
+    elif held == "yes":
+        text = (f" You have already made up your mind: you hand them {offer_side(want)} now." if ask else
+                " You have already made up your mind: you take it. The trade happens now: you hand them"
+                f" {offer_side(want)} and they hand you {offer_side(give)}.")
+    elif held == "no":
+        text = (" You have already made up your mind: you won't. Tell them no." if ask else
+                " You have already made up your mind: you turn it down. Tell them no.")
+    else:
+        text = (f" You can't give {name} that now." if ask else " You can't make this trade now.") + " Tell them no."
+    return text + talk_record_line(name, given, refused) + OFFER_CLOSE
+
+
+def offer_said(give: dict, want: dict) -> str:
+    """The offer as the one who makes it would say it: the engine's words, kept as the occasion's detail."""
+    return (f"I ask you for {offer_side(want, yours=True)}." if offer_empty(give)
+            else f"I offer you {offer_side(give)} for {offer_side(want, yours=True)}.")
+
+
 ID_REF = re.compile(r"#(\d+)\b")
 
 
@@ -300,7 +402,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "45"  # 45 = things-1 (#118): unique things in one ledger (state["things"], kinds in asiimov/things.py), in a world whose stakes hold `things`: made at the first possess (`things`), grown again at dawn (`grew`), taken, put down and handed over by the player (`took`, `dropped`, `handed`), and gone only by being used (`used`); a fixture's use is the verb done there. A world without the stake, or with no player, has none: only the engine field differs from 44. 44 = verbs-1 (#116): every verb is one row of a table (asiimov/verbs.py: who may use it, what it names, what it needs, its cost, its words, its handler) and the engine's lists, menu, cost and dispatch read it; a pure move, so the log and every prompt are byte-identical: only the engine field differs from 43. 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "deal-1"  # deal-1: the player offers a villager in reach a trade (`offer`: two sides, each counts of food and coin and thing ids). Limits refuse it at once in words; nothing wanted is a gift; anything else is settled by one roll on the receiver's nature when it lands, held for the day per exact terms (`offered`, then a `decided` roll on its own keyed stream), which the receiver then answers aloud (its mind words an answer already made), and a yes moves both sides at once in one `deal` (move "offer", maps `gives` and `gets`). Every gift warms by one rule, 100 x min(worth, price) // price: give_food and give_coin as before, a thing handed over by its kind's worth (things-1 gave it 100). No player, or a player who makes no offer and hands nothing over: only the engine field differs from 45. 45 = things-1 (#118): unique things in one ledger (state["things"], kinds in asiimov/things.py), in a world whose stakes hold `things`: made at the first possess (`things`), grown again at dawn (`grew`), taken, put down and handed over by the player (`took`, `dropped`, `handed`), and gone only by being used (`used`); a fixture's use is the verb done there. A world without the stake, or with no player, has none: only the engine field differs from 44. 44 = verbs-1 (#116): every verb is one row of a table (asiimov/verbs.py: who may use it, what it names, what it needs, its cost, its words, its handler) and the engine's lists, menu, cost and dispatch read it; a pure move, so the log and every prompt are byte-identical: only the engine field differs from 43. 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -571,7 +673,19 @@ class Sim:
             fam = ", ".join(agents[m]["name"] for m in self.state["families"][sp["family"]]["members"]
                             if m != sp["id"])
             move, price, ask, choice, told = occ.get("move"), occ.get("price"), "", "", {}
-            if move:  # talk-1: what is offered is decided here, from the state the prompt shows
+            off = occ.get("offer")
+            if off:  # deal-1: a keyed offer. Its answer is made already (the roll when it landed); what can still
+                # stop it is checked here, live, from the state the prompt shows, and the mind only words it
+                why = self._offer_limit(sp, a, off["gives"], off["gets"])
+                view["trade"] = {"move": "offer", "gives": off["gives"], "gets": off["gets"],
+                                 "answer": "yes" if why is None and off["answer"] == "yes" else "no",
+                                 "decided": off["decided"], **({"withheld": why} if why is not None else {})}
+                rec = self._talk_record(a, sp["id"])  # the ask record, which trades leave alone (B5.7)
+                give, want = off["words"]
+                choice = offer_choice(None if why is not None else off["answer"], OFFER_WHY.get(why), sp["name"],
+                                      give, want, rec["yes"], rec["no"])
+                tail = offer_tail(sp["name"], give, want, fam, choice)
+            elif move:  # talk-1: what is offered is decided here, from the state the prompt shows
                 answers, why, roll = self._talk_offer(a, sp, move, price)
                 view["answers"], view["deal"] = answers, {"move": move, **({"price": price} if price is not None else {}),
                                                           **roll}
@@ -592,7 +706,8 @@ class Sim:
                             for g in view["gives"]}
                 choice = typed_choice(held and held["answer"], TALK_WHY[why] if why is not None else None, sp["name"],
                                       rec["yes"], rec["no"])
-            tail = answer_tail(sp["name"], occ["detail"], fam, ask, choice)
+            if not off:
+                tail = answer_tail(sp["name"], occ["detail"], fam, ask, choice)
         # The tail is part of the section's budget, so a crowd shortens "Here:" and never cuts the head (Steering
         # 2026-11-19 01:39Z: a tail-clip had cut "# Now", the time, the place and the holdings on busy places).
         situation = self._situation(a, view, kind, tail)
@@ -719,6 +834,9 @@ class Sim:
                 data["withheld"] = [x for x in DELIBERATE_ACTIONS if x not in req.view["offer"]]
             if req.kind == "answer" and "answers" in req.view:  # talk-1: what the answer could be, and the roll
                 data["offered"], data["deal"] = req.view["answers"], req.view["deal"]
+            if req.kind == "answer" and "trade" in req.view:  # deal-1: the offer's one answer, and what it rests on
+                tr = req.view["trade"]
+                data["offered"], data["deal"] = [tr["answer"]], {k: v for k, v in tr.items() if k != "answer"}
             if req.kind == "answer" and "typed" in req.view:  # text-1: what a typed line could be given, and on what
                 data["typed"] = {"offered": req.view.get("gives", ["nothing"]), **req.view["typed"]}
             if i in retried:
@@ -836,8 +954,11 @@ class Sim:
             rest += REFLECT_ASK
         where = f"You are at {a['place']}." if a["place"] else \
             f"You are on your way to the {a['route']['to']}." if a["route"] else "You are out in the open, between places."
+        # deal-1 (Steering 2026-11-25 04:50Z): the answer's prompt also names what the hands hold, as the view does,
+        # so "your flower" or "your hands are full" rests on a fact it shows. Empty hands read as before.
+        held = [r["kind"] for r in self.carried(a["id"])] if kind == "answer" and "things" in self.state else []
         head = (f"Day {self.state['tick'] // TICKS_PER_DAY}, {m // 60:02d}:{m % 60:02d}. {where} "
-                f"Hunger {a['needs']['hunger']}/1000. You carry {a['inv']['food']} food and {a['inv']['coin']} coin. "
+                f"Hunger {a['needs']['hunger']}/1000. You carry {carry_words(a['inv']['food'], a['inv']['coin'], held)}. "
                 f"Here: ")
         room = situation_budget(kind) * 4 - len(f"# Now ({kind})\n") - len(head) - len(rest) - len(tail) - 2
         # The speaker (an answer's), then kin, then the strongest feelings, then id: the people one would notice in a
@@ -1295,8 +1416,11 @@ class Sim:
         me, last = self.state["player"]["agent"], self.state["tick"] - 1
         # Only an awake listener whose line was said last tick: a sleeper's occasion waits till morning, and holding
         # the village's dawn plans for it helps no reply (review of #99).
+        # deal-1: an offer lands the moment it is recorded, so its answer can be due on its own tick.
         return any(not b["asleep"] and (b["occasion"] or {}).get("why") == "spoken"
-                   and (b["occasion"] or {}).get("who") == me and (b["occasion"] or {}).get("tick") == last
+                   and (b["occasion"] or {}).get("who") == me
+                   and ((b["occasion"] or {}).get("tick") == last
+                        or "offer" in b["occasion"] and b["occasion"]["tick"] == last + 1)
                    for b in self.state["agents"])
 
     def _defer(self, a: dict, kind: str) -> bool:
@@ -2095,11 +2219,15 @@ class Sim:
                 a["occasion"] = None
                 return
             a["occasion"] = None
+            if occ["why"] == "spoken" and occ.get("offer") and not self._near(self.state["agents"][occ["who"]], a):
+                return self._offer_gone(a, occ)  # deal-1: nobody left to answer: no call, and the deal says so
         a["cooldown_until"] = tick + 12
         view = self._view(a, occupancy)
         view["occasion"] = {k: occ.get(k) for k in ("why", "who", "detail")}
         if occ.get("move"):  # talk-1: the line's move, for the answer's tail and offer
             view["occasion"].update({k: occ[k] for k in ("move", "price") if k in occ})
+        if occ.get("offer"):  # deal-1: the keyed offer, for the answer's tail
+            view["occasion"]["offer"] = occ["offer"]
         parents = [occ["event"]] if occ["event"] is not None else []
         if occ["why"] == "spoken":  # say-3: its own kind, words and what it does next; no action menu
             self._request(a, "answer", view, parents, lambda eid, out, occ=occ: self._answer_line(a, occ, eid, out))
@@ -2285,6 +2413,9 @@ class Sim:
 
     def _do_hail(self, a: dict, eid: int, action: str, target):
         return self._hail(a, eid, target)
+
+    def _do_offer(self, a: dict, eid: int, action: str, target):
+        return self._offer_act(a, eid, target)
 
     def _person_act(self, a: dict, action: str, target: int, eid: int) -> int:
         """ask_kin, ask_food, buy_from or steal, with a valid target id. Returns the receipt's event id."""
@@ -2624,7 +2755,8 @@ class Sim:
         rid = self._receipt(a, eid, do, True, "gave", extra={"to": b["id"], what: n},
                             parents=self._price_cause() if what == "coin" else ())
         r = self._met(b, a["id"])
-        r["affinity"] = min(1000, r["affinity"] + 100)
+        # one rule for every gift (_gift_warmth): 1 food, or a meal's price in coin, is worth the full 100
+        r["affinity"] = min(1000, r["affinity"] + self._gift_warmth(n * self._price() if what == "food" else n))
         r["cause"] = rid
         self._met(a, b["id"])
         self._note(a["id"], f"gave {n} {what} to {b['name']}")
@@ -2769,7 +2901,7 @@ class Sim:
         # talk-1 (design §2.4): an active player who moves on has declined, so its nature no longer gives for it.
         for q in (list(self.state["player"].get("asks", [])) if action not in SAY_ACTS + HAIL_ACTS else []):
             self._settle_ask(q, 0, [eid])
-        if action in GO_ACTS + SAY_ACTS + HAIL_ACTS + THING_ACTS:  # no offer, cooldown or people: checked when applied
+        if action in GO_ACTS + SAY_ACTS + HAIL_ACTS + THING_ACTS + OFFER_ACTS:  # no offer, cooldown or people: checked when applied
             self.player_pending[a["id"]] = (eid, action, target, [], [])
             return
         if action in RATED_ACTS and self.state["tick"] < a["cooldown_until"]:
@@ -2932,10 +3064,10 @@ class Sim:
                 return self._receipt(a, eid, action, False, why, extra=ex)
             ev = self._emit("handed", "rule", a["id"], ex, [eid])
             r["holder"] = target
-            rid = self._receipt(a, eid, action, True, "handed", extra=ex, parents=[ev])
+            rid = self._receipt(a, eid, action, True, "handed", extra=ex, parents=[ev] + self._price_cause())
             gift = row["words"]["gift"]  # a gift, by give_food's rule: the receiver warms to the giver and may stop to think
             rel = self._met(b, a["id"])
-            rel["affinity"] = min(1000, rel["affinity"] + 100)
+            rel["affinity"] = min(1000, rel["affinity"] + self._gift_warmth(row["worth"]))
             rel["cause"] = rid
             self._met(a, target)
             self._note(a["id"], f"gave {gift} to {b['name']}")
@@ -2956,6 +3088,237 @@ class Sim:
         self.state["things"]["list"].remove(r)  # used up: a thing goes only here (B3.3)
         a["inv"]["food"] += use["food"]
         return self._receipt(a, eid, action, True, "picked", extra={**ex, "food": use["food"]}, parents=[ev])
+
+    # ------------------------------------------------------------------ deal-1 (B5): the offer
+    def _side_words(self, side: dict) -> dict:
+        """A side with its things as their kinds, sorted: the form its words and a held decision take."""
+        kinds = sorted(self.thing(i)["kind"] for i in side.get("things", ()))
+        return {**{k: side[k] for k in OFFER_COUNTS if k in side}, **({"things": kinds} if kinds else {})}
+
+    def _worth(self, words: dict) -> int:
+        """What a side is worth in coin when an offer is weighed: food at the stall's price, a coin 1, a thing
+        its kind's worth (things.THINGS)."""
+        return (words.get("food", 0) * self._price() + words.get("coin", 0)
+                + sum(THINGS[k]["worth"] for k in words.get("things", ())))
+
+    def _gift_warmth(self, worth: int) -> int:
+        """How much a gift worth `worth` coin warms its receiver to the giver: one rule for every gift (Steering
+        2026-11-25 04:38Z). A meal's price or more is 100, which is what give_food (1 food) and give_coin (a meal's
+        price) give; under it, in proportion, so a picked flower or a single coin doesn't buy a meal's warmth."""
+        price = self._price()
+        return 100 * min(worth, price) // price
+
+    def _holds(self, x: dict, side: dict) -> bool:
+        """Whether `x` holds everything a side names: the counts, and each thing in its own hands."""
+        for i in side.get("things", ()):
+            r = self.thing(i)
+            if r is None or r["holder"] != x["id"]:
+                return False
+        return all(x["inv"][k] >= side.get(k, 0) for k in OFFER_COUNTS)
+
+    def _offer_limit(self, a: dict, t: dict, give: dict, want: dict) -> str | None:
+        """Why `a`'s offer of `give` for `want` can't be put to `t`, or settled with it, as things stand (B5.7):
+        the receipt's reason, or None. Out of reach, asleep, the giver lacks what it offers, the receiver lacks
+        what is wanted, the receiver would keep under OFFER_KEEP_FOOD food, a grudge below OFFER_MIN_AFFINITY, or
+        hands that would be over-full. A gift (nothing wanted) is held to reach, sleep, holdings and hands only.
+        Read-only. Checked when the offer lands, when its answer is asked for, and after the answer's words."""
+        if not self._near(a, t):
+            return "target not here"
+        if t["asleep"]:
+            return "target asleep"
+        if not self._holds(a, give):
+            return "not yours to offer"
+        if not self._holds(t, want):
+            return "not theirs to give"
+        if not offer_empty(want):
+            if want.get("food") and t["inv"]["food"] - want["food"] + give.get("food", 0) < OFFER_KEEP_FOOD:
+                return "nothing to spare"
+            if t["relationships"].get(str(a["id"]), {}).get("affinity", 0) < OFFER_MIN_AFFINITY:
+                return "bad terms"
+        cap = self.state.get("stakes", {}).get("things", {}).get("carry", 0)
+        more = len(give.get("things", ())) - len(want.get("things", ()))  # things the receiver ends up with, net
+        if more > 0 and len(self.carried(t["id"])) + more > cap:
+            return "target hands full"
+        if more < 0 and len(self.carried(a["id"])) - more > cap:
+            return "hands full"
+        return None
+
+    def _offer_roll_limit(self, t: dict, a: dict, give: dict, want: dict) -> tuple[int, dict]:
+        """Under what roll (of 1000) `t`'s nature takes `a`'s offer of `give` for `want` (sides in words), and what
+        that rests on. Each side is worth its coin (_worth): v_in comes to `t`, v_out leaves it. The terms run from
+        ask_food's base (nothing for something) through buy_from's (an even trade: 1 food at the stall's price is
+        exactly buy_from) up to SHARE_MAX (something for nothing). To the terms go the same agreeableness, affinity
+        and kin as _share_answer adds, clamped as there; a bare ask of family is ask_kin's rule, as ask_food's is.
+        The loss cap (Steering 2026-11-25 04:06Z): where `t` would be out more than one food's price, the limit
+        falls by price / loss, so the odds of a yes shrink as fast as the stake grows ("1 coin for 50 coin" would
+        else stand at the bare ask's odds). 1 food for its price, and a bare ask for 1 food, lose no more than that
+        price, so both keep the odds of the acts they settle like."""
+        price = self._price()
+        v_in, v_out = self._worth(give), self._worth(want)
+        low, fair = SHARE_BASE["ask_food"], SHARE_BASE["buy_from"]
+        if v_in < v_out:
+            terms = low + (fair - low) * v_in // v_out
+        elif v_in == v_out:
+            terms = fair
+        else:
+            terms = fair + (SHARE_MAX - fair) * (v_in - v_out) // v_in
+        kin = a["id"] in self.state["families"][t["family"]]["members"]
+        if offer_empty(give) and kin:
+            limit = self._kin_limit(t, a)
+        else:
+            affinity = t["relationships"].get(str(a["id"]), {}).get("affinity", 0)
+            limit = _clamp(terms + t["traits"]["agreeableness"] // 4 + affinity // 4 + (SHARE_KIN if kin else 0),
+                           0, SHARE_MAX)
+        loss = max(v_out - v_in, 0)
+        if loss > price:
+            limit = limit * price // loss
+        return limit, {"terms": terms, "in": v_in, "out": v_out, "loss": loss, "kin": kin}
+
+    def _offer_book(self, t: dict, giver: int) -> dict:
+        """The answers `t` holds today to `giver`'s offers, by exact terms: {key: {"answer", "event", "done"}},
+        `done` once a yes was dealt. The live record, or an empty one."""
+        b = t.get("offers", {}).get(str(giver))
+        return b["held"] if b is not None and b["day"] == self.state["tick"] // TICKS_PER_DAY else {}
+
+    def _hold_offer(self, t: dict, giver: int, key: str, answer: str, eid: int):
+        """Store `t`'s answer to these exact terms for the day, made by event `eid`. Only today's are kept: a world
+        with no player never has the field."""
+        day = self.state["tick"] // TICKS_PER_DAY
+        book = {k: v for k, v in t.get("offers", {}).items() if v["day"] == day}
+        book.setdefault(str(giver), {"day": day, "held": {}})["held"][key] = {"answer": answer, "event": eid, "done": 0}
+        t["offers"] = book
+
+    def _move(self, frm: dict, to: dict, side: dict):
+        """Hand a side over: its counts, and each thing into `to`'s hands."""
+        for k in OFFER_COUNTS:
+            frm["inv"][k] -= side.get(k, 0)
+            to["inv"][k] += side.get(k, 0)
+        for i in side.get("things", ()):
+            self.thing(i)["holder"] = to["id"]
+
+    def _offer_act(self, a: dict, eid: int, target):
+        """deal-1: the player's offer to a villager in reach lands. A limit refuses it with its reason: no roll, no
+        call. A gift moves at once, as give_food's does. Anything else is put to the villager: an `offered` event
+        in a line's place, the listening hold, and the villager's nature answers it, once for the day per exact
+        terms (a `decided` roll on its own keyed stream, which a second offer of the same terms finds held, and at
+        most OFFERS_PER_DAY distinct terms a day; terms it loses on and already dealt on are done for the day). The villager then
+        speaks that answer (its "spoken" occasion carries the offer), and a yes settles after its words."""
+        agents, tick = self.state["agents"], self.state["tick"]
+        d = json.loads(json.dumps(self.events[eid].data))  # a copy: the sides go into state
+        give, want = d["give"], d["want"]
+        if not (0 <= target < len(agents)) or target == a["id"]:
+            return self._receipt(a, eid, "offer", False, "unknown target")
+        t, to = agents[target], {"to": target}
+        why = self._offer_limit(a, t, give, want)
+        if why is not None:
+            return self._receipt(a, eid, "offer", False, why, extra=to)
+        gw, ww = self._side_words(give), self._side_words(want)
+        if offer_empty(want):
+            return self._offer_gift(a, t, eid, give, gw)
+        key, book = canonical({"give": gw, "want": ww}), self._offer_book(t, a["id"])
+        held = book.get(key)
+        # Terms the receiver loses on, once dealt, are done for the day; a fair or better deal's held yes may be
+        # had again, within the limits (Steering 2026-11-25 04:35Z: a fair repeat is no pump, a lossy one is).
+        if held is not None and held["done"] and self._worth(ww) > self._worth(gw):
+            return self._receipt(a, eid, "offer", False, "already traded", extra=to)
+        if held is None and len(book) >= OFFERS_PER_DAY:
+            return self._receipt(a, eid, "offer", False, "too many offers", extra=to)
+        oid = self._emit("offered", "rule", a["id"], {"with": target, "gives": give, "gets": want, "place": a["place"]},
+                         [eid])
+        if held is None:  # its nature answers these terms once today, on a stream of their own (T22)
+            day = tick // TICKS_PER_DAY
+            stream = f"offer:{target}:{a['id']}:{key}"
+            roll = self.rng.at(stream, day, 0, 999)
+            limit, basis = self._offer_roll_limit(t, a, gw, ww)
+            answer = "yes" if roll < limit else "no"
+            priced = give.get("food") or want.get("food")  # food is weighed at the stall's price
+            did = self._emit("decided", "chance", target,
+                             {"with": a["id"], "move": "offer", "gives": gw, "gets": ww, "answer": answer, "stream": stream,
+                              "index": day, "roll": roll, "limit": limit, **basis},
+                             [oid] + (self._price_cause() if priced else []))
+            self._hold_offer(t, a["id"], key, answer, did)
+            held = self._offer_book(t, a["id"])[key]
+        self._met(a, target)
+        self._met(t, a["id"])
+        ask = offer_empty(give)
+        self._note(target, f"{a['name']} asked me for {offer_side(ww)}" if ask
+                   else f"{a['name']} offered me {offer_side(gw)} for {offer_side(ww)}")
+        self._note(a["id"], f"I asked {t['name']} for {offer_side(ww)}" if ask
+                   else f"I offered {t['name']} {offer_side(gw)} for {offer_side(ww)}")
+        self._listen(t, oid)
+        # Always heard, as a line is: it replaces any pending occasion. Its detail is the engine's own sentence.
+        t["occasion"] = {"why": "spoken", "salience": t["cognition"]["deliberation_threshold"], "who": a["id"],
+                         "event": oid, "detail": offer_said(gw, ww), "tick": tick,
+                         "offer": {"gives": give, "gets": want, "words": [gw, ww], "key": key,
+                                   "answer": held["answer"], "decided": held["event"]}}
+        return self._receipt(a, eid, "offer", True, "offered", extra=to, parents=[oid])
+
+    def _offer_gift(self, a: dict, t: dict, eid: int, give: dict, gw: dict):
+        """An offer that wants nothing (B5.3): it moves at once with a `deal`, and by give_food's rule the receiver
+        warms to the giver and may stop to think. The warmth is give_food's 100 for a gift worth a meal's price or
+        more, and in proportion under it (Steering 2026-11-25 04:35Z), so a coin doesn't buy what a meal buys; the
+        receipt cites the price step in force, as give_coin's does."""
+        did = self._emit("deal", "rule", a["id"], {"move": "offer", "from": a["id"], "to": t["id"], "gives": give,
+                                                   "gets": {}, "ok": True}, [eid])
+        self._move(a, t, give)
+        rid = self._receipt(a, eid, "offer", True, "gave", extra={"to": t["id"]}, parents=[did] + self._price_cause())
+        words = offer_side(gw)
+        rel = self._met(t, a["id"])
+        rel["affinity"] = min(1000, rel["affinity"] + self._gift_warmth(self._worth(gw)))
+        rel["cause"] = rid
+        self._met(a, t["id"])
+        self._note(a["id"], f"gave {words} to {t['name']}")
+        self._note(t["id"], f"{a['name']} gave me {words}")
+        self._occasion(t, "gift", 400 + t["traits"]["agreeableness"] // 4, a["id"], rid, words)
+        self._close_contact(a, t, rid)
+        self._keep(a, t, eid)
+        return rid
+
+    def _offer_gone(self, t: dict, occ: dict):
+        """deal-1 (Steering 2026-11-25 04:50Z): the one who made the offer is out of reach when `t` would answer it.
+        A villager doesn't speak to someone who has left: no answer call, and a `deal` that moved nothing says
+        "gone", citing the offer and `t`'s decision, so the player is told. Its terms stay open for the day."""
+        sp, off = self.state["agents"][occ["who"]], occ["offer"]
+        self._note(sp["id"], f"I left before {t['name']} answered my offer")
+        self._emit("deal", "rule", sp["id"], {"move": "offer", "from": sp["id"], "to": t["id"], "gives": off["gives"],
+                                             "gets": off["gets"], "ok": False, "why": "gone"},
+                   [occ["event"], off["decided"]])
+
+    def _settle_offer(self, t: dict, occ: dict, eid: int, withheld: str | None):
+        """After the answer's words (B5.2b). A rolled no is the villager's no: its words say it, and no deal is
+        written. A yes is checked again, live, and moves both sides at once in one `deal` that cites the offer, the
+        answer and the decision. A yes that can no longer be had (`withheld`: found when the answer's prompt was
+        built; or found here) writes a deal that moved nothing, with its reason, so a yes never just fizzles."""
+        sp, off = self.state["agents"][occ["who"]], occ["offer"]
+        give, want = off["gives"], off["gets"]
+        gw, ww = off["words"]
+        ask = offer_empty(gw)
+        r = self._met(sp, t["id"])
+        self._met(t, sp["id"])
+        if off["answer"] != "yes":
+            self._note(sp["id"], f"{t['name']} refused to give me {offer_side(ww)}" if ask
+                       else f"{t['name']} turned down my offer of {offer_side(gw)} for {offer_side(ww)}")
+            return
+        why = withheld if withheld is not None else self._offer_limit(sp, t, give, want)
+        why = "gone" if why == "target not here" else why  # said from the offerer's side, as _offer_gone's
+        data = {"move": "offer", "from": sp["id"], "to": t["id"], "gives": give, "gets": want}
+        parents = [occ["event"], eid, off["decided"]]
+        if why is not None:
+            self._emit("deal", "rule", sp["id"], {**data, "ok": False, "why": why}, parents)
+            return
+        self._move(sp, t, give)
+        self._move(t, sp, want)
+        held = self._offer_book(t, sp["id"]).get(off["key"])
+        if held is not None and held["event"] == off["decided"]:
+            held["done"] = 1  # these terms are dealt for today
+        r["affinity"] = min(1000, r["affinity"] + OFFER_WARMS)
+        if ask:
+            self._note(sp["id"], f"{t['name']} gave me {offer_side(ww)} when I asked")
+            self._note(t["id"], f"gave {offer_side(ww)} to {sp['name']}, who asked")
+        else:
+            self._note(sp["id"], f"traded with {t['name']}: gave {offer_side(gw)}, got {offer_side(ww)}")
+            self._note(t["id"], f"traded with {sp['name']}: gave {offer_side(ww)}, got {offer_side(gw)}")
+        self._emit("deal", "rule", sp["id"], {**data, "ok": True}, parents)
 
     def _keep(self, a: dict, b: dict, eid: int):
         """reach-1 (Steering 2026-11-23 20:24Z): an act of the player's on a walker it stopped, from within
@@ -3024,13 +3387,7 @@ class Sim:
         # The prompt gets the words only as one quoted, clipped field (Steering 05:28Z): no double quotes inside.
         # The listening hold (Steering 11:32Z): it doesn't walk off for LISTEN_TICKS, and each new line restarts
         # that. Only when no other override runs: a sick day home or a trade keeps going; an answer's leave walks.
-        ov = t["override"]
-        if ov is None:
-            t["override"] = {"do": "stay", "target": None, "place": self._dest(t), "event": sid, "left": LISTEN_TICKS,
-                             "talk": True}
-        elif ov.get("talk") and ov["do"] == "stay":
-            ov["left"] = max(ov["left"], LISTEN_TICKS)
-        self._halt(t, LISTEN_TICKS, [sid])  # reach-1: a walker spoken to on its way stops to listen, as long
+        self._listen(t, sid)
         t["occasion"] = {"why": "spoken", "salience": t["cognition"]["deliberation_threshold"], "who": a["id"],
                          "event": sid, "detail": quoted, "tick": self.state["tick"]}
         if move is not None:  # talk-1: a later line without a chip replaces it, and asks nothing
@@ -3039,6 +3396,16 @@ class Sim:
                 t["occasion"]["price"] = price
         self._talk_decide(t, a, sid, move, price)  # text-1: its private decision, before any call reads the words
         return self._receipt(a, eid, "say", True, "said", extra={"to": target}, parents=[sid])
+
+    def _listen(self, t: dict, sid: int):
+        """The listening hold (say-3, reach-1): `t` stands where it is for LISTEN_TICKS after line (or offer) `sid`."""
+        ov = t["override"]
+        if ov is None:
+            t["override"] = {"do": "stay", "target": None, "place": self._dest(t), "event": sid, "left": LISTEN_TICKS,
+                             "talk": True}
+        elif ov.get("talk") and ov["do"] == "stay":
+            ov["left"] = max(ov["left"], LISTEN_TICKS)
+        self._halt(t, LISTEN_TICKS, [sid])  # reach-1: a walker spoken to on its way stops to listen, as long
 
     def _talk_guard(self, a: dict) -> frozenset:
         """The speakers `a` may not give to now: those whose line to it is within its talk window (say-1)."""
@@ -3065,7 +3432,10 @@ class Sim:
         self._reply(a, occ, eid, out, answer, gives)
         if answer is not None:
             deal = self.events[eid].data["deal"]
-            self._settle_talk(a, occ, eid, answer, deal.get("withheld"), deal.get("decided"))
+            if deal["move"] == "offer":  # deal-1: a keyed offer settles by its own rule
+                self._settle_offer(a, occ, eid, deal.get("withheld"))
+            else:
+                self._settle_talk(a, occ, eid, answer, deal.get("withheld"), deal.get("decided"))
         elif gives == "food":
             self._settle_talk(a, occ, eid, "yes", decided=typed["decided"], typed=True)
         nxt = (out or {}).get("next")
@@ -3198,6 +3568,12 @@ class Sim:
                     _is_int(thing) and thing >= 0 and (_is_int(target) if action in HAND_ACTS else target is None)):
                 raise ValueError(f"act: {action!r} names a thing by its id, hand also its target, and nothing else does "
                                  f"({thing!r}, {target!r})")
+            give, want = act.get("give"), act.get("want")  # deal-1: the two sides of an offer
+            if (action in OFFER_ACTS) != (give is not None or want is not None) or action in OFFER_ACTS and not (
+                    _is_int(target) and offer_side_ok(give) and offer_side_ok(want)
+                    and not (offer_empty(give) and offer_empty(want))):
+                raise ValueError(f"act: {action!r} names a target and two sides, give and want, each counts of food and "
+                                 f"coin and thing ids, not both empty, and nothing else does ({give!r}, {want!r})")
             to = act.get("to")
             if (action in WALK_ACTS) != (to is not None) or action in WALK_ACTS and not (
                     target is None and on_map(self.map, to)):
@@ -3217,6 +3593,8 @@ class Sim:
                 data["text"] = text
             if thing is not None:
                 data["thing"] = thing
+            if give is not None:
+                data["give"], data["want"] = give, want
             if move is not None:  # talk-1: the chip's move, and the price the client showed for a buy
                 data["move"] = move
                 if price is not None:

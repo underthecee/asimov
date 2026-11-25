@@ -28,7 +28,7 @@ from asiimov.events import Event, read_jsonl
 from asiimov.invariants import Checker, state_violations
 from asiimov.minds import StubMind
 from asiimov.replay import replay
-from asiimov.sim import ANSWER_ACTS, COST, GO_ACTS, HAIL_ACTS, THING_ACTS, PLAYER_ACTIONS, SAY_ACTS, SUB, TICKS_PER_DAY, WALK_ACTS, Sim, act_cost
+from asiimov.sim import ANSWER_ACTS, COST, GO_ACTS, HAIL_ACTS, OFFER_ACTS, THING_ACTS, PLAYER_ACTIONS, SAY_ACTS, SUB, TICKS_PER_DAY, WALK_ACTS, Sim, act_cost
 from asiimov.worldmap import WALK, bounds, distance, on_map, own_tiles, place_at
 from test_inhabitant import batch_of, intent
 from test_live import WS
@@ -188,8 +188,9 @@ def test_a_walk_never_moves_the_body_faster_than_walking_speed(seed):
 # ------------------------------------------------------------------ applied as it arrives (Sim.take)
 def small_act(rng, sim, agents):
     """Any act a player may send but a walk, with what it needs. (Acts on things have their own session, in
-    a world that has things: tests/test_things.py. Left out here, this one draws what it drew before them.)"""
-    action = rng.choice([a for a in PLAYER_ACTIONS if a not in WALK_ACTS + THING_ACTS])
+    a world that has things: tests/test_things.py; offers have theirs: tests/test_deal.py. Left out here, this
+    one draws what it drew before them.)"""
+    action = rng.choice([a for a in PLAYER_ACTIONS if a not in WALK_ACTS + THING_ACTS + OFFER_ACTS])
     act = {"kind": "act", "action": action}
     if action in GO_ACTS:
         act["place"] = rng.choice(sorted(sim.map["places"]))

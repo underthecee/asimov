@@ -21,6 +21,7 @@ const Plan := preload("res://scripts/plan_queue.gd")
 const TalkBox := preload("res://scripts/talk_box.gd")
 const Art := preload("res://scripts/art.gd")
 const Keys := preload("res://scripts/walk_keys.gd")
+const Offer := preload("res://scripts/offer_box.gd")
 const PICKED_W := 380.0  # recorded mode: the "who is here" column
 const BUNDLED := "res://bundled/playback.json.gz"  # the world an export carries (CI puts it there before it exports)
 const COLORS := {"sleep": Color(0.35, 0.35, 0.5), "home": Color(0.6, 0.6, 0.7), "work": Color(0.85, 0.6, 0.2),
@@ -61,12 +62,18 @@ var bubbles := []           # inhabitant: words shown over their speaker (V3) {w
 var drawn_at := {}          # inhabitant: id -> where that villager was drawn this frame (for bubbles)
 const BUBBLE_S := 6.0       # a bubble shows this long, then fades; the line stays in "Said near you"
 var say_once := ""          # --say TEXT (dev, screenshots): say it once to the first villager here, awake
+var trade_once := false     # --trade 1 (dev, screenshots): open the Trade panel once on the first villager in reach
 var walk_pos := Vector2.ZERO # inhabitant, walk-1: where your body is drawn while the keys walk it, in tiles
 var walking := false         # the keys have the body: it is drawn at walk_pos, ahead of the engine's next tick
 var walk_at := -99.0         # when the last walk was sent, in seconds
 var walk_place = ""          # the place the engine last said you walked into (null: the open), for the log line
 var reach := -1              # the villager within reach of E, by where they are drawn
 var e_items := []            # the E list while it is open: [{label, action, target}]
+var kinds := {}              # deal-1: thing id -> its kind, from every view, so a line can name a thing that moved
+var trade_to := -1           # deal-1: whom the Trade panel is open on, or -1 (closed)
+var trade_n := {"give": {}, "want": {}}  # the counts picked on each side, by name (food, coin, a thing's kind)
+var trade_spin := {"give": {}, "want": {}}  # each side's count boxes, by name
+var offer_out := {}          # villager id -> true while an offer of yours waits on their answer
 var picked := ""            # recorded mode: the place clicked, shown in the "who is here" panel
 var announced := false      # recorded mode: "playing" printed once, for the export's smoke test
 
@@ -117,6 +124,7 @@ func _ready() -> void:
 		client.connect_to(args.get("url", "ws://127.0.0.1:8765/"))
 		ui["status"].text = "connecting"
 	say_once = str(args.get("say", ""))
+	trade_once = args.has("trade")
 	if args.has("screenshot"):  # live: wait for the welcome and a few ticks first
 		shot = {"path": args["screenshot"], "frames": 5 if log_path != "" else 180}
 
@@ -339,6 +347,39 @@ func _build_inhabit_ui() -> void:
 	# say-1: talk to someone here in your own words; their mind answers on the next tick.
 	ui["said"] = _panel(feed_box, "Said near you", true)  # readable-world C3: talk you can hear, in words
 	ui["said"].append_text("[color=#8a93a6]Conversations near you, and what people say to you, show up here.[/color]\n")
+	# deal-1: the Trade panel. A villager's "offer a trade" button (or the E list) opens it on them; you pick
+	# what you give and what you want, and Offer sends both sides. The engine settles it and they answer in words.
+	var trade := VBoxContainer.new()
+	trade.visible = false
+	feed_box.add_child(trade)
+	ui["trade"] = trade
+	var trade_head := HBoxContainer.new()
+	trade.add_child(trade_head)
+	var trade_name := Label.new()
+	trade_name.add_theme_color_override("font_color", Color(0.65, 0.75, 0.9))
+	trade_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	trade_head.add_child(trade_name)
+	ui["trade_name"] = trade_name
+	var trade_close := Button.new()
+	trade_close.text = "Close"
+	trade_close.pressed.connect(_trade_open.bind(-1))
+	trade_head.add_child(trade_close)
+	for k in ["give", "want"]:
+		var r := HFlowContainer.new()
+		trade.add_child(r)
+		ui["trade_" + k] = r
+	var trade_foot := HBoxContainer.new()
+	trade.add_child(trade_foot)
+	var trade_note := Label.new()
+	trade_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	trade_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	trade_foot.add_child(trade_note)
+	ui["trade_note"] = trade_note
+	var trade_send := Button.new()
+	trade_send.text = "Offer"
+	trade_send.pressed.connect(_trade_send)
+	trade_foot.add_child(trade_send)
+	ui["trade_send"] = trade_send
 	var talk_head := Label.new()
 	talk_head.text = "Talk"
 	talk_head.add_theme_color_override("font_color", Color(0.65, 0.75, 0.9))
@@ -425,6 +466,7 @@ var _caught_up := false
 
 
 func _learn_names(v: Dictionary) -> void:
+	Offer.learn(kinds, v)
 	for p in v.get("present", []) + v.get("kin", []):
 		names[int(p["id"])] = p["name"]
 		if p.has("role"):
@@ -458,18 +500,39 @@ func _feed(evs: Array) -> void:
 		if e["kind"] == "reply" and e["data"].has("why") and not asked.get(int(e["actor"]), true):
 			e = e.duplicate(true)  # why they can't give is said under an ask for food, not under small talk
 			e["data"].erase("why")
-		var line := Words.describe(e, client.me, names)
+		var line := Words.describe(e, client.me, names, kinds)
+		line += _offer_answer(e, evs)
 		if line != "":
 			var at := "[color=#8a93a6]%s[/color]  %s\n" % [Words.clock(int(e["tick"]), client.ticks_per_day()).split(", ")[1], line]
 			_append(ui["feed"], at)
 			if e["kind"] == "reply" and str(e["data"].get("next", "")) == "leave" and e["data"].get("with") != null \
 					and int(e["data"]["with"]) == int(client.me["id"]):
 				leaving[int(e["actor"])] = int(e["tick"])  # pt11: not a Talk target while they walk off
-			if e["kind"] in ["said", "reply", "deal", "ask"]:  # say-1: spoken words (talk-1: and deals, asks) go where talk is read
+			if e["kind"] in ["said", "reply", "deal", "ask", "offered"]:  # say-1: spoken words (talk-1: and deals, asks; deal-1: offers) go where talk is read
 				_append(ui["said"], at)
 				var words := str(e["data"].get("text" if e["kind"] == "said" else "says", ""))
 				if words != "" and _caught_up:
 					_bubble(int(e["actor"]), words, e["data"].get("with") != null and int(e["data"]["with"]) == int(client.me["id"]), 0.0)
+
+
+func _offer_answer(e: Dictionary, evs: Array) -> String:
+	## deal-1: under a villager's answer to your offer, whether it was a no. A yes is followed by its deal, which
+	## has a line of its own (also when the yes could no longer be had); a refused offer stops waiting too.
+	var d: Dictionary = e.get("data", {})
+	if e["kind"] == "receipt" and str(d.get("action", "")) in Words.OFFER_ACTS and d.get("to") != null \
+			and not (d.get("ok", false) and str(d.get("why", "")) == "offered"):
+		offer_out.erase(int(d["to"]))
+	if e["kind"] == "deal" and str(d.get("why", "")) == "gone" and d.get("to") != null:
+		offer_out.erase(int(d["to"]))  # you walked off before they answered: no reply is coming
+	if e["kind"] != "reply" or not d.has("answer") or not offer_out.has(int(e["actor"])) \
+			or d.get("with") == null or int(d["with"]) != int(client.me["id"]):
+		return ""
+	offer_out.erase(int(e["actor"]))
+	for x in evs:
+		if x["kind"] == "deal" and str(x["data"].get("move", "")) == "offer" and int(x["data"].get("to", -1)) == int(e["actor"]) \
+				and int(x["id"]) > int(e["id"]):
+			return ""
+	return "\n    [color=#8a93a6]No trade: nothing changed hands.[/color]"
 
 
 func _append(panel: RichTextLabel, text: String) -> void:
@@ -787,12 +850,100 @@ func _lost_lines(evs: Array) -> void:
 func _choose(action: String, target: int, place: String, label: String, thing: int = -1) -> void:
 	## A button or a map place: into the plan with "Plan ahead" on, else done now. A yes or no to an ask always
 	## goes now: it has a few ticks before your habits answer (aipt1 fix 3).
+	if action in Words.OFFER_ACTS:  # deal-1: an offer has two sides to pick first; the Trade panel sends it
+		_trade_open(target)
+		return
 	if ui["ahead"].button_pressed and not action in ["agree", "decline"] and thing < 0:  # a thing is acted on now
 		if plan_q.size() < Plan.MAX_STEPS:
 			plan_q.append(Plan.step(action, target, place, label))
 		_plan_run()
 	elif pending.is_empty():
 		pending = {"id": client.act(action, target, place, "", "", -1, thing), "label": label, "tick": int(client.view["tick"])}
+	_refresh_inhabit()
+
+
+func _trade_open(t: int) -> void:
+	## Open the Trade panel on villager `t`, with nothing picked; -1 closes it.
+	trade_to = t
+	trade_n = {"give": {}, "want": {}}
+	for k in trade_spin:
+		for n in trade_spin[k]:
+			trade_spin[k][n].set_value_no_signal(0)
+	_refresh_trade()
+
+
+func _trade_sides() -> Array:
+	## [give, want] as the act carries them, from the counts picked and what each of you holds.
+	var v: Dictionary = client.view
+	return [Offer.side(trade_n["give"], Offer.by_kind(v.get("carried", []))),
+			Offer.side(trade_n["want"], Offer.by_kind(Offer.carries(v, trade_to)))]
+
+
+func _refresh_trade() -> void:
+	## The panel follows the view: a count box for food, coin and each kind of thing held, on each side, capped
+	## at what the side can hold; the line under them says what Offer will send, or why it can't.
+	var box: VBoxContainer = ui["trade"]
+	box.visible = trade_to >= 0 and not client.view.is_empty()
+	if not box.visible:
+		return
+	var v: Dictionary = client.view
+	var who := str(names.get(trade_to, "#%d" % trade_to))
+	ui["trade_name"].text = "Trade with %s" % who
+	var caps := Offer.caps(v, trade_to)
+	for k in ["give", "want"]:
+		var row: HFlowContainer = ui["trade_" + k]
+		var want_names: Array = caps[k].keys()
+		if row.get_meta("names", []) != want_names:  # what can be picked changed: new boxes, the counts kept
+			row.set_meta("names", want_names)
+			for c in row.get_children():
+				row.remove_child(c)
+				c.queue_free()
+			trade_spin[k] = {}
+			var lead := Label.new()
+			lead.text = "You give:" if k == "give" else "You want:"
+			row.add_child(lead)
+			for n in want_names:
+				var sp := SpinBox.new()
+				sp.max_value = int(caps[k][n])
+				sp.value = mini(int(trade_n[k].get(n, 0)), int(caps[k][n]))
+				sp.suffix = n
+				sp.select_all_on_focus = true
+				sp.value_changed.connect(func(x):
+					trade_n[k][n] = int(x)
+					_refresh_trade())
+				sp.get_line_edit().text_submitted.connect(func(_t): sp.get_line_edit().release_focus())  # Enter: back to the keys
+				row.add_child(sp)
+				trade_spin[k][n] = sp
+		for n in trade_spin[k]:
+			var sp: SpinBox = trade_spin[k][n]
+			if int(sp.max_value) != int(caps[k][n]):
+				sp.max_value = int(caps[k][n])  # a shrinking cap brings the count down with it
+			trade_n[k][n] = int(sp.value)
+	var sides := _trade_sides()
+	var line := Offer.summary(sides[0], sides[1], who, kinds)
+	var why := ""
+	if not Offer.can(v, trade_to):
+		why = "%s isn't in reach to trade with right now." % who
+	elif line == "":
+		why = "Pick what you give, what you want, or both."
+	ui["trade_note"].text = why if why != "" else line
+	ui["trade_send"].disabled = why != "" or not pending.is_empty()
+
+
+func _trade_send() -> void:
+	var sides := _trade_sides()
+	if trade_to < 0 or not pending.is_empty() or not Offer.can(client.view, trade_to) \
+			or (Offer.empty(sides[0]) and Offer.empty(sides[1])):
+		return
+	var who := str(names.get(trade_to, "#%d" % trade_to))
+	pending = {"id": client.act("offer", trade_to, "", "", "", -1, -1, sides[0], sides[1]),
+			"label": Words.action_label("offer", who), "tick": int(client.view["tick"])}
+	if not Offer.empty(sides[1]):
+		offer_out[trade_to] = true  # they answer an offer that asks for something; a gift just moves
+	for k in trade_spin:  # the next offer starts from nothing
+		for n in trade_spin[k]:
+			trade_spin[k][n].set_value_no_signal(0)
+		trade_n[k] = {}
 	_refresh_inhabit()
 
 
@@ -967,6 +1118,11 @@ func _refresh_inhabit() -> void:
 	if v.is_empty():
 		return
 	var per_day := client.ticks_per_day()
+	if trade_once and not v.get("offer", {}).get("offer", []).is_empty():
+		trade_once = false
+		_trade_open(int(v["offer"]["offer"][0]))
+		trade_spin["give"]["coin"].value = 1  # shown, not sent
+		trade_spin["want"]["food"].value = 1
 	ui["you"].text = Words.status(v, client.me, per_day)
 	ui["plan"].text = Words.plan(v, per_day, names)
 	ui["here"].text = Words.here(v, doing)
@@ -977,6 +1133,7 @@ func _refresh_inhabit() -> void:
 	ui["plan_clear"].disabled = plan_q.is_empty()
 	_rebuild_menu()
 	_refresh_talk()
+	_refresh_trade()
 
 
 func _rebuild_menu() -> void:

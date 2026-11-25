@@ -88,7 +88,7 @@ def replays(sim):
 def test_the_kinds_table_is_whole():
     assert 1 <= len(THINGS) <= 6 and set(FIXTURES) | set(GROWN) == set(THINGS)  # B3.2
     for kind, row in THINGS.items():
-        assert set(row) == {"carry", "use", "own", "cost", "stands", "grows", "words"}, kind
+        assert set(row) == {"carry", "use", "own", "cost", "stands", "grows", "words"} | ({"worth"} if row["carry"] else set()), kind  # deal-1: what a carried kind is worth in an offer
         assert type(row["carry"]) is bool and type(row["cost"]) is int and row["cost"] >= 0, kind
         use = row["use"]
         assert use is None or set(use) in ({"food"}, {"verb"}), kind
@@ -354,7 +354,7 @@ def someone_awake(sim, b):
     raise AssertionError("nobody awake anywhere")
 
 
-def test_handing_a_flower_over_is_a_gift_by_give_foods_rule():
+def test_handing_a_flower_over_is_a_gift_that_warms_by_what_a_flower_is_worth():
     sim, b = world()
     me = sim.state["agents"][b]
     fl = carrying(sim, b)
@@ -372,7 +372,10 @@ def test_handing_a_flower_over_is_a_gift_by_give_foods_rule():
     assert r.data == {"action": "hand", "ok": True, "why": "handed", "thing": fl["id"], "kind": "flower", "to": v["id"]}
     assert handed.data == {"thing": fl["id"], "kind": "flower", "to": v["id"]} and r.parents[1] == handed.id
     assert (fl["at"], fl["holder"]) == (None, v["id"]) and not sim.carried(b) and sim.carried(v["id"]) == [fl]
-    assert v["relationships"][str(b)]["affinity"] == min(1000, warmth + 100) and v["relationships"][str(b)]["cause"] == r.id
+    # deal-1 (Steering 2026-11-25 04:38Z): every gift warms by one rule, 100 x min(worth, price) // price; a meal is 100
+    warm = 100 * min(THINGS["flower"]["worth"], sim._price()) // sim._price()
+    assert 0 < warm < 100
+    assert v["relationships"][str(b)]["affinity"] == min(1000, warmth + warm) and v["relationships"][str(b)]["cause"] == r.id
     assert any("gave a flower to " + v["name"] in str(m) for m in me["recent"])
     assert any(me["name"] + " gave me a flower" in str(m) for m in v["recent"])
     # the receiver may stop to think about it, as after a gift of food (the row check below reads its prompt)
@@ -415,7 +418,9 @@ def test_row_check_a_gift_of_a_thing_reads_as_a_food_gift_but_for_the_giver_and_
     """Steering 2026-11-23 22:03Z, in L39's style, at no cost: per kind, the receiver's prompt after the gift
     differs from its prompt after a gift of food only in the occasion's sentence and the memory's note, and
     those name exactly the giver and the thing. Twin worlds, one giving 1 food and one handing the thing (with
-    the same food moved by hand, so what each carries is the same)."""
+    the same food moved by hand, so what each carries is the same).
+    deal-1 (Steering 2026-11-25 04:38Z): and in one more line, the receiver's affinity for the giver, which reads
+    the gift's warmth by what the thing is worth where the meal's reads 100; the line is checked to the number."""
     gift, found = THINGS[kind]["words"]["gift"], 0
     for pick in range(6):
         twins = []
@@ -442,10 +447,13 @@ def test_row_check_a_gift_of_a_thing_reads_as_a_food_gift_but_for_the_giver_and_
             start = sim.state["tick"]
             for _ in range(6):
                 sim.step([])
-            twins.append((me["name"], sim._who(b), [p for p in mind.prompts if p[1] == v["id"] and p[0] >= start - 1 and p[2] == "deliberate"]))
+            twins.append((me["name"], sim._who(b), [p for p in mind.prompts if p[1] == v["id"] and p[0] >= start - 1 and p[2] == "deliberate"],
+                          sim._price()))
         if len(twins) < 2:
             break
-        (giver, who, food), (_, _, thing) = twins
+        (giver, who, food, price), (_, _, thing, price2) = twins
+        assert price == price2
+        warm = 100 * min(THINGS[kind]["worth"], price) // price
         food = [p for p in food if "gave you 1 food" in p[3]]
         thing = [p for p in thing if f"gave you {gift}" in p[3]]
         if not food or not thing:
@@ -457,8 +465,14 @@ def test_row_check_a_gift_of_a_thing_reads_as_a_food_gift_but_for_the_giver_and_
         diff = [(x, y) for x, y in zip(la, lc) if x != y]
         assert diff
         for x, y in diff:
-            assert y == x.replace(f"{who} gave you 1 food", f"{who} gave you {gift}").replace(
-                f"{giver} gave me 1 food", f"{giver} gave me {gift}"), (x, y)
+            want = x.replace(f"{who} gave you 1 food", f"{who} gave you {gift}").replace(
+                f"{giver} gave me 1 food", f"{giver} gave me {gift}")
+            if ": affinity " in x:  # the receiver's line for the giver: the meal's 100 against the thing's worth
+                head, was = x.rsplit(": affinity ", 1)
+                assert giver in head and warm != 100
+                want = f"{head}: affinity {int(was) - 100 + warm}"
+            assert y == want, (x, y)
+        assert sum(": affinity " in x for x, _ in diff) == (warm != 100)
         assert f"Why you stop to think: {who} gave you {gift}." in c and f"{giver} gave me {gift}" in c
         assert c.count(gift) == a.count(f"{who} gave you 1 food") + a.count(f"{giver} gave me 1 food") == 2
         found += 1

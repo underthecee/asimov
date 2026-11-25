@@ -6,6 +6,7 @@ extends RefCounted
 # verbs-1: the words for each verb and for each reason a receipt can carry are the verb table's
 # (asiimov/verbs.py), written out as verb_words.gd by `python -m asiimov.verbs`. Change them there.
 const VerbWords := preload("res://scripts/verb_words.gd")
+const Offer := preload("res://scripts/offer_box.gd")
 const VERB := VerbWords.VERB
 const ACTION := VerbWords.ACTION
 const NOW := VerbWords.NOW
@@ -23,6 +24,7 @@ const RATED := VerbWords.RATED  # held to the cooldown (sim.RATED_ACTS)
 # things-1: the verbs that name a thing, and by kind a thing's name and the label of each verb it allows
 # (asiimov/things.py). A kind with no label for a verb doesn't take it.
 const THING_ACTS := VerbWords.THING_ACTS
+const OFFER_ACTS := VerbWords.OFFER_ACTS
 const THING_NAME := VerbWords.THING_NAME
 const THING_USE := VerbWords.THING_USE
 const THING_TAKE := VerbWords.THING_TAKE
@@ -121,10 +123,11 @@ static func action_label(action: String, target_name: String) -> String:
 	return s % target_name if "%s" in s else s
 
 
-static func describe(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
+static func describe(e: Dictionary, me: Dictionary, names: Dictionary, kinds := {}) -> String:
 	## One line for an event the villager witnessed, or "" for bookkeeping it needn't read. Another's act aimed
 	## at this villager adds what that villager said of it, its own mind's words (the server's `says`).
-	var line := _line(e, me, names)
+	## deal-1: `kinds` names a thing's kind by id (offer_box.learn), for an offer or a deal that names things.
+	var line := _line(e, me, names, kinds)
 	if line == "" or e.get("kind") == "reply":  # a reply's `says` is its line already
 		return line
 	return line + said(e.get("data", {}))
@@ -136,7 +139,7 @@ static func said(d: Dictionary) -> String:
 	return "\n    [i]\"%s\"[/i]" % str(w).replace("[", "[lb]") if w is String and w != "" else ""
 
 
-static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
+static func _line(e: Dictionary, me: Dictionary, names: Dictionary, kinds := {}) -> String:
 	var me_id := int(me.get("id", -1))
 	var d: Dictionary = e.get("data", {})
 	var mine: bool = e.get("actor") != null and int(e["actor"]) == me_id
@@ -209,8 +212,16 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary) -> String:
 					ask = " (offering %d coin for 1 food)" % int(d.get("price", 0))
 			return "%s say%s to %s: \u201c%s\u201d%s" % [a, "" if mine else "s", _who(d.get("with"), me_id, names),
 					str(d.get("text", "")).replace("[", "[lb]"), ask]
+		"offered":  # deal-1: an offer put to a villager; they answer in their own words, and a yes makes the deal
+			var to := _who(d.get("with"), me_id, names)
+			if not d.has("gives"):  # seen from too far to hear the terms
+				return "%s offer%s %s a trade." % [a, "" if mine else "s", to]
+			if Offer.empty(d["gives"]):
+				return "%s ask%s %s for %s." % [a, "" if mine else "s", to, Offer.words(d["gets"], kinds)]
+			return "%s offer%s %s %s for %s." % [a, "" if mine else "s", to, Offer.words(d["gives"], kinds),
+					Offer.words(d["gets"], kinds)]
 		"deal":  # talk-1: what a yes moved, or why it moved nothing
-			return deal_line(d, me_id, names)
+			return deal_line(d, me_id, names, kinds)
 		"reply":  # say-1: a villager's answer to what was said to it
 			if not d.has("says"):  # reach-1: seen answering, from too far to hear
 				return "%s answers %s, too far off to hear." % [a, _who(d.get("with"), me_id, names)]
@@ -248,6 +259,11 @@ static func _receipt(e: Dictionary, d: Dictionary, mine: bool, a: String, me: Di
 		return line + (": " + answer + "." if answer != "" else ".")
 	if str(d.get("action", "")) in THING_ACTS:
 		return _thing_receipt(d, me_id, names)
+	if str(d.get("action", "")) in OFFER_ACTS:  # deal-1
+		if d.get("ok", false):
+			return ""  # the offer's own line says it, or the gift's deal
+		return "[color=#e07070]Your offer to %s wasn't made: %s.[/color]" % [
+				_who(d["to"], me_id, names) if d.get("to") != null else "them", said]
 	if e.get("origin") == "rule" and why in ["heading to market", "started", "waited"] and d.get("ok", false):
 		return ""  # the activity line that follows says it
 	if str(d.get("action", "")) == "say" and not d.get("ok", false):  # aipt1: a lost line is said in the log
@@ -308,8 +324,34 @@ const DEAL_WHY := {"not together": "you're no longer together", "asleep": "they 
 		"nothing to spare": "they have nothing to spare now", "no coin": "you don't have the coin now"}
 
 
-static func deal_line(d: Dictionary, me_id: int, names: Dictionary) -> String:
+static func _offer_deal(d: Dictionary, me_id: int, names: Dictionary, kinds: Dictionary) -> String:
+	## deal-1: an offer's deal. `from` made the offer and `to` answered it; both sides moved at once, or the
+	## yes could no longer be had and nothing moved (`why`, a reason of the offer verb's own).
+	var mine: bool = d.get("from") != null and int(d["from"]) == me_id
+	var a := _who(d.get("from"), me_id, names, true)
+	var b := _who(d.get("to"), me_id, names)
+	var g: Dictionary = d.get("gives", {})
+	var w: Dictionary = d.get("gets", {})
+	if str(d.get("why", "")) == "gone":  # the offerer left before the answer: none was given
+		return "[color=#e07070]%s didn't answer %s offer: %s.[/color]" % [_who(d.get("to"), me_id, names, true),
+				"your" if mine else _who(d.get("from"), me_id, names) + "'s", WHY.get("gone", "gone") if mine else "they had gone"]
+	if not d.get("ok", false):
+		var why: String = WHY.get(str(d.get("why", "")), str(d.get("why", "")))
+		return "[color=#e07070]%s said yes, but nothing changed hands: %s.[/color]" % [_who(d.get("to"), me_id, names, true), why]
+	var line := "%s and %s make a trade." % [a, b]
+	if Offer.empty(w) and not Offer.empty(g):  # a gift: nothing asked back
+		line = "%s gave %s %s." % [a, b, Offer.words(g, kinds)]
+	elif Offer.empty(g) and not Offer.empty(w):  # an ask: nothing offered
+		line = "%s gave %s %s." % [_who(d.get("to"), me_id, names, true), _who(d.get("from"), me_id, names), Offer.words(w, kinds)]
+	elif not Offer.empty(g):
+		line = "%s traded with %s: %s gave %s and got %s." % [a, b, "you" if mine else "they", Offer.words(g, kinds), Offer.words(w, kinds)]
+	return "[color=#80d080]%s[/color]" % line if mine else line
+
+
+static func deal_line(d: Dictionary, me_id: int, names: Dictionary, kinds := {}) -> String:
 	## talk-1: "Vone gave you 1 food", "You bought 1 food from Vone for 6 coin", or why a yes didn't settle.
+	if str(d.get("move", "")) == "offer":
+		return _offer_deal(d, me_id, names, kinds)
 	var giver := _who(d.get("from"), me_id, names, true)
 	var to := _who(d.get("to"), me_id, names)
 	var buy: bool = str(d.get("move", "")) == "wants_to_buy_food"

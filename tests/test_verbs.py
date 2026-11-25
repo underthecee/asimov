@@ -74,8 +74,8 @@ NARRATOR_DOING = {"work": "at work", "socialize": "passing the time", "home": "a
 # ------------------------------------------------------------------ a pure move: the lists
 def test_every_list_read_from_the_table_is_the_literal_it_replaced():
     for name, was in BEFORE.items():
-        if name == "PLAYER_ACTIONS":  # things-1 added its four rows after them, and nothing else has changed
-            assert S.PLAYER_ACTIONS == verbs.PLAYER_ACTIONS == was + verbs.THING_ACTS
+        if name == "PLAYER_ACTIONS":  # things-1 added its four rows after them and deal-1 its one; nothing else has changed
+            assert S.PLAYER_ACTIONS == verbs.PLAYER_ACTIONS == was + verbs.THING_ACTS + verbs.OFFER_ACTS
             continue
         assert getattr(S, name) == was == getattr(verbs, name), name
     for name, was in UNORDERED.items():
@@ -112,7 +112,7 @@ def test_every_row_is_whole():
     assert sorted(ranks) == list(range(1, len(ranks) + 1))  # a step's rank is its place in STEP_DOS
     for name, row in VERBS.items():
         assert row["who"] and set(row["who"]) <= {"mind", "player", "rule"}, name
-        assert row["takes"] in (None, "person", "place", "tile", "line", "thing", "gift"), name
+        assert row["takes"] in (None, "person", "place", "tile", "line", "thing", "gift", "offer"), name
         assert row["kind"] in ("now", "ask", "reach", "hold", "activity", "go"), name
         assert callable(getattr(Sim, row["handler"])), name  # the engine method that carries it out
         assert (row["among"] is not None) == (name in S.DELIBERATE_ACTIONS and row["takes"] == "person"), name
@@ -173,6 +173,9 @@ def _player_days(seed: int) -> Sim:
                 act["target"] = rng.randrange(24)
             elif takes in ("thing", "gift"):  # things-1: this world has none, and says so
                 act.update(thing=rng.randrange(40), **({"target": rng.randrange(24)} if takes == "gift" else {}))
+            elif takes == "offer":  # deal-1: a trade, an ask or a gift of food and coin, to anyone
+                act.update(target=rng.randrange(24), give=rng.choice([{}, {"coin": 3}, {"food": 1}, {"coin": 40}]),
+                           want=rng.choice([{"food": 1}, {"coin": 2}, {"food": 9}]))
             acts = [act] * (2 if rng.random() < 0.05 else 1)
         sim.step(acts)
     return sim
@@ -219,6 +222,8 @@ def _act(sim, name, b, f=0):
         act["target"] = other
     elif takes in ("thing", "gift"):
         act.update(thing=0, **({"target": other} if takes == "gift" else {}))
+    elif takes == "offer":
+        act.update(target=other, give={"coin": 1}, want={"food": 1})
     return act
 
 

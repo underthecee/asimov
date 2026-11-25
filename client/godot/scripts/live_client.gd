@@ -154,8 +154,9 @@ func fire(family: int) -> String:
 
 
 func act(action: String, target: int = -1, place: String = "", text: String = "", move: String = "",
-		price: int = -1, thing: int = -1) -> String:
+		price: int = -1, thing: int = -1, give = null, want = null) -> String:
 	## things-1: `thing` is the id of the thing a take, drop, use or hand names, and only theirs.
+	## deal-1: `give` and `want` are an offer's two sides (offer_box.side), and only an offer's: it carries both.
 	## Inhabitant scope: the body's act. Its ack names the act event; the receipt follows in a tick's events.
 	## `place` is go_to's (engine 24), and only go_to's; `text` is say's (say-1), and only say's. `move` (talk-1) is
 	## a say's chip, "asks_food" or "wants_to_buy_food"; a buy carries the `price` shown.
@@ -175,6 +176,9 @@ func act(action: String, target: int = -1, place: String = "", text: String = ""
 		args["price"] = price
 	if thing >= 0:
 		args["thing"] = thing
+	if give != null or want != null:
+		args["give"] = give if give != null else {}
+		args["want"] = want if want != null else {}
 	_send({"type": "intent", "id": id, "verb": "act", "args": args, "seen_tick": view_tick})
 	return id
 

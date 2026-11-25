@@ -5,7 +5,7 @@ unattended run (asiimov/soak.py, which counts them and keeps going). Each check 
 violation strings instead of raising, so a long run can report every one it hits.
 """
 from .events import ORIGINS, Event
-from .sim import DAWN, PERSON_STEPS, RULE_STEPS, STEP_DOS, SUB, TICKS_PER_DAY, Sim
+from .sim import DAWN, PERSON_STEPS, RULE_STEPS, STEP_DOS, SUB, TICKS_PER_DAY, Sim, offer_empty, offer_side_ok
 from .things import FIXTURES, GROWN, THINGS
 from .worldmap import REACH, SEE, near, on_map, own_tiles, place_at, slot, tile_at, travel_ticks
 
@@ -154,7 +154,8 @@ def presence_violations(events: list[Event], start: int, where: dict, bodies: Bo
 class Things:
     """things-1 (B3.3): the ledger of things rebuilt from the log alone. A thing is made only in a `things`
     or a `grew` event, goes only in a `used` one, and changes hands or tiles only in `took`, `dropped` and
-    `handed`; so each kind's total changes only there, and the state's ledger must equal this one."""
+    `handed`, or (deal-1) between the two sides of an offer's `deal` that moved; so each kind's total changes
+    only there, and the state's ledger must equal this one."""
 
     def __init__(self, sim: Sim):
         self.all = {r["id"]: dict(r) for r in sim.state.get("things", {}).get("list", [])}
@@ -174,6 +175,15 @@ class Things:
                 if t["id"] != self.next or (t["kind"] not in (GROWN if e.kind == "grew" else THINGS)):
                     out.append(f"event {e.id}: made thing {t}")
                 self.all[t["id"]], self.next = {"id": t["id"], "kind": t["kind"], "at": list(t["at"]), "holder": None}, t["id"] + 1
+            return out
+        if e.kind == "deal" and d["move"] == "offer" and d["ok"]:  # deal-1: each side's things change hands
+            for side, frm, to in (("gives", d["from"], d["to"]), ("gets", d["to"], d["from"])):
+                for tid in d[side].get("things", ()):
+                    r = self.all.get(tid)
+                    if r is None or r["holder"] != frm:
+                        out.append(f"event {e.id}: deal moved thing {tid} ({r}), which {frm} doesn't carry")
+                    else:
+                        r["holder"] = to
             return out
         if e.kind not in ("took", "dropped", "used", "handed"):
             return out
@@ -255,6 +265,9 @@ def deal_violations(events: list[Event], start: int = 0, possessed=None) -> list
         if e.kind != "deal":
             continue
         d = e.data
+        if d["move"] == "offer":
+            out += _offer_deal_violations(events, e)
+            continue
         typed = "typed" in d
         said = next((events[p] for p in e.parents if events[p].kind == "said"), None)
         mind = next((events[p] for p in e.parents if events[p].kind == "mind_answer"), None)
@@ -281,6 +294,49 @@ def deal_violations(events: list[Event], start: int = 0, possessed=None) -> list
             if dec is None or dec.id != basis.get("decided") or dec.actor != d["from"] or dec.data.get("with") != d["to"] \
                     or dec.data.get("move") != d["move"] or dec.id >= mind.id or (d["ok"] and not yes):
                 out.append(f"event {e.id}: deal without the listener's own earlier yes to this speaker")
+    return out
+
+
+def _offer_deal_violations(events: list[Event], e: Event) -> list[str]:
+    """deal-1 (B5.2b): an offer's `deal` is the offerer's (`from`), with two well-formed sides. A gift (nothing
+    wanted) moved, and cites the player's own act that named those sides. Any other cites the `offered` event with
+    its sides, the receiver's own `decided` roll about this offerer and these terms, made before the answer, and the
+    receiver's `mind_answer`, whose request rested on that roll; and one that moved goods rests on a rolled yes that
+    the request offered as the only answer, with nothing withheld. So no offer moves goods on a mind's word."""
+    d, out = e.data, []
+    sides_ok = offer_side_ok(d.get("gives")) and offer_side_ok(d.get("gets")) \
+        and not (offer_empty(d["gives"]) and offer_empty(d["gets"]))
+    if not sides_ok or e.actor != d["from"] or d["from"] == d["to"]:
+        return [f"event {e.id}: deal {d}"]
+    cited = [events[p] for p in e.parents]
+    if offer_empty(d["gets"]):
+        act = next((c for c in cited if c.kind == "act" and c.origin == "player"), None)
+        if not (d["ok"] and act is not None and act.actor == d["from"] and act.data.get("target") == d["to"]
+                and act.data.get("give") == d["gives"] and act.data.get("want") == {}):
+            out.append(f"event {e.id}: a gift's deal without the act that gave it")
+        return out
+    off = next((c for c in cited if c.kind == "offered"), None)
+    mind = next((c for c in cited if c.kind == "mind_answer"), None)
+    dec = next((c for c in cited if c.kind == "decided"), None)
+    if off is None or off.actor != d["from"] or off.data["with"] != d["to"] or off.data["gives"] != d["gives"] \
+            or off.data["gets"] != d["gets"]:
+        out.append(f"event {e.id}: deal without the offer it settles")
+    if mind is None and d.get("why") == "gone":  # the offerer left before the answer: no call, nothing moved
+        if d["ok"] or dec is None or dec.actor != d["to"] or dec.data.get("with") != d["from"] \
+                or dec.data.get("move") != "offer" or dec.id >= e.id:
+            out.append(f"event {e.id}: a gone offer's deal without the receiver's decision on it")
+        return out
+    if mind is None or mind.actor != d["to"] or mind.data.get("deal", {}).get("move") != "offer":
+        return out + [f"event {e.id}: deal without the receiver's answer to an offer"]
+    basis = mind.data["deal"]
+    if dec is None or dec.actor != d["to"] or dec.data.get("with") != d["from"] or dec.data.get("move") != "offer" \
+            or dec.id != basis.get("decided") or dec.id >= mind.id or dec.data.get("answer") != "yes" \
+            or dec.data["roll"] >= dec.data["limit"] or (off is not None and off.id not in mind.parents):
+        out.append(f"event {e.id}: deal without the receiver's own earlier rolled yes to this offer")
+    if d["ok"] and (mind.data.get("offered") != ["yes"] or "withheld" in basis):
+        out.append(f"event {e.id}: deal moved goods on an answer that wasn't the offered yes")
+    if not d["ok"] and not d.get("why"):
+        out.append(f"event {e.id}: a deal that moved nothing says no reason")
     return out
 
 

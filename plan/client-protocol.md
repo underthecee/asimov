@@ -74,6 +74,9 @@ It gets:
   body in that place or beside it; one in the open, within 6 tiles. `carried` lists what is in the body's
   hands, `{id, kind}`. `offer` gains `take`, `use` and `drop` (the ids of the things each may name) and
   `hand` (who is in reach and awake, while something is carried). A world without things has none of these.
+  With deal-1: `offer.offer` lists who an offer can be put to (anyone awake and in reach), and, in a world
+  that has things, each `present` entry and each `seen` entry in reach carries `carries`, what is in that
+  villager's hands, `[{id, kind}]` (what an offer may ask them for).
   With walk-1, `pos` is the tile the engine holds for a walked body, and `place` and `route` are both null
   while it stands in the open (`present` is then empty and `offer` holds only what needs nobody).
   With space-1 (plan/v0-contracts-spec.md, B1) every `pos` is the tile the body stands on: for someone at a
@@ -149,6 +152,25 @@ sent twice and none skipped.
     (`buy_food`, `work`, `rest`). Refusals: `nothing there`, `not in reach`, `can't be carried`, `hands full`,
     `already carried`, `not carried`, `no use`, `not yours`, `target not here`, `target asleep`, `target hands
     full`. `thing` goes only on these four, and `target` only on `hand`; anything else is `bad_args`.
+  - `act` with `{"action": "offer", "target": id, "give": side, "want": side}` (deal-1, the player's alone): an
+    offer put to a villager awake and in reach. A side is `{"food": n, "coin": n, "things": [ids]}`, each part
+    optional, a count from 1 to 999, at most 8 distinct things; `{}` is the empty side, and not both may be
+    empty. It lands at once and costs a sim-minute. The engine's limits refuse it with a receipt and nothing
+    else (no roll, no mind call): `target not here`, `target asleep`, `not yours to offer`, `not theirs to
+    give`, `nothing to spare` (food asked for that would leave them under 1), `bad terms` (they hold a grudge),
+    `hands full`, `target hands full`, `too many offers` (a fourth different offer to them in a day) and
+    `already traded` (these exact terms, on which they lose, were dealt on today). A gift (`want` empty) moves at once: a `deal`
+    `{move: "offer", from, to, gives, gets: {}, ok: true}` by the giver and the receipt `gave`. Any other offer
+    writes `offered {with, gives, gets, place}` by the player and the receipt `offered`. The villager's nature
+    answers those exact terms once for the day (a `decided` chance event with its roll and limit), and on the
+    next tick the villager says that answer in its own words: a `reply` with `answer` `yes` or `no`. After a
+    yes the engine checks the limits again and writes one `deal` `{move: "offer", from, to, gives, gets, ok}`
+    by the one who offered (`from`), citing the offer, the answer and the decision: both sides move at once,
+    or `ok: false` with `why` (a limit above) when the yes can no longer be had. A no writes no deal. If the
+    player has walked out of reach before the villager would answer, there is no reply: the `deal` has
+    `ok: false` and `why: "gone"`, whatever the answer would have been. `give`
+    and `want` go only on `offer`; on anything else, or malformed, they are `bad_args`. `verbs.act.give` and
+    `verbs.act.want` list the parts a side may hold. A new verb doesn't change the protocol number (B6.1).
   - `act` with `{"action": "walk", "to": [x, y]}` (walk-1, the player's alone): the body steps toward that tile,
     x first, as far as walking speed allows since its last walk: it earns `map.walk` tiles a tick as sim-time
     passes and keeps at most one tick's walking while it stands (time-1a). A walk that asks for more is cut
