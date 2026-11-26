@@ -36,8 +36,9 @@ from collections import defaultdict
 from . import inhabitant, narrate, persist
 from .llm import SCHEMAS
 from .minds import NoisyMind, ScriptMind, StubMind
-from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, HAIL_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
+from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, HAIL_ACTS, HAND_ACTS, THING_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
                   TICKS_PER_DAY, act_cost)
+from .things import DEFAULTS as THING_DEFAULTS
 from .worldmap import bounds, on_map
 
 PROTOCOL = 3               # 2 adds the inhabitant scope (plan/player-body-spec.md); 3 is time-1a: a walk is applied and
@@ -70,7 +71,7 @@ class LiveRunner:
 
     def __init__(self, out: str, mind, seed: int = 1, agents: int = 25, order: str = "id",
                  snapshot_every: int = TICKS_PER_DAY, mind_kind: str | None = None, workers: int = 1,
-                 talk: dict | None = None):
+                 talk: dict | None = None, things: dict | None = None):
         self.out = out
         self.mind = mind
         if os.path.exists(os.path.join(out, "events.jsonl")):
@@ -78,7 +79,7 @@ class LiveRunner:
             self.reopened = True
         else:
             self.run = persist.start(out, seed, agents, mind, order, {}, workers, snapshot_every=snapshot_every,
-                                     mind_kind=mind_kind, talk=talk)
+                                     mind_kind=mind_kind, talk=talk, things=things)
             self.reopened = False
         self.sim = self.run.sim
         self.intents: dict[str, dict] = {}  # intent id -> {status, tick, slot, act, event | reason}
@@ -270,7 +271,10 @@ class LiveRunner:
             go, say = args.get("action") in GO_ACTS, args.get("action") in SAY_ACTS
             walk, to = args.get("action") in WALK_ACTS, args.get("to")  # walk-1: a tile, and nothing else
             move, price = args.get("move"), args.get("price")  # talk-1: the chip on a say, and a buy's shown price
-            ok = set(args) <= {"action", "target", "place", "text", "move", "price", "to"} \
+            thing = args.get("thing")  # things-1: the thing a take, drop, use or hand names, by its id
+            ok = set(args) <= {"action", "target", "place", "text", "move", "price", "to", "thing"} \
+                and (thing is not None) == (args.get("action") in THING_ACTS) \
+                and (thing is None or _is_int(thing) and thing >= 0 and (t is not None) == (args["action"] in HAND_ACTS)) \
                 and isinstance(args.get("action"), str) \
                 and (to is not None) == walk and (not walk or (t is None and on_map(self.sim.map, to))) \
                 and ((move is None and price is None) or say and isinstance(move, str) and move in TALK_MOVES
@@ -291,6 +295,8 @@ class LiveRunner:
                 act["to"] = list(to)
             if say:
                 act["text"] = text
+            if thing is not None:
+                act["thing"] = thing
             if move is not None:
                 act["move"] = move
                 if price is not None:
@@ -1178,6 +1184,10 @@ def main(argv=None):
                     help="talk-1, a new world only: who answers a line said with a chip. nature (the default): "
                          "today's roll; mind: the villager's mind (a 32B session); private (text-1): the villager's "
                          "mind, asked before any call reads the player's words, once a day per speaker")
+    ap.add_argument("--things", action="store_true",
+                    help="things-1, a new world only: things lie in the world from the first possess (berries and "
+                         "flowers in the woods, the stall, a bench at each workplace, a bed in each home), and a player "
+                         "can pick them up, put them down, use them and hand them over")
     ap.add_argument("--typed", action="store_true",
                     help="text-1, a new world only: a line typed with no chip may be given 1 food, on the decision "
                          "already held (consent private or nature). A script mind needs --hear-url to hear an ask")
@@ -1228,7 +1238,10 @@ def main(argv=None):
     if (args.hear_url or args.hear_model) and (kind != "script" or not (args.hear_url and args.hear_model)):
         raise SystemExit("--hear-url and --hear-model go together, for --mind script in a --typed world")
     runner = LiveRunner(args.out, mind, args.seed, args.agents, mind_kind=kind,
-                        workers=args.workers or (64 if kind == "llm" else 1), talk=talk_params(args.consent, args.typed, args.think))
+                        workers=args.workers or (64 if kind == "llm" else 1), talk=talk_params(args.consent, args.typed, args.think),
+                        things=json.loads(json.dumps(THING_DEFAULTS)) if args.things else None)
+    if args.things and "things" not in runner.sim.state.get("stakes", {}):
+        raise SystemExit(f"{args.out} was started without --things; it applies to a new world")
     params = runner.sim._talk_params()
     consent = params["consent"]
     if args.consent and args.consent != consent:

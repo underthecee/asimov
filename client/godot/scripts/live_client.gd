@@ -4,6 +4,8 @@
 # server's offer, never computed here. Sends intents and controls only; never state.
 extends RefCounted
 
+const VerbWords := preload("res://scripts/verb_words.gd")
+
 const PROTOCOL := 3
 const WorldModel := preload("res://scripts/world_model.gd")
 
@@ -152,7 +154,8 @@ func fire(family: int) -> String:
 
 
 func act(action: String, target: int = -1, place: String = "", text: String = "", move: String = "",
-		price: int = -1) -> String:
+		price: int = -1, thing: int = -1) -> String:
+	## things-1: `thing` is the id of the thing a take, drop, use or hand names, and only theirs.
 	## Inhabitant scope: the body's act. Its ack names the act event; the receipt follows in a tick's events.
 	## `place` is go_to's (engine 24), and only go_to's; `text` is say's (say-1), and only say's. `move` (talk-1) is
 	## a say's chip, "asks_food" or "wants_to_buy_food"; a buy carries the `price` shown.
@@ -170,6 +173,8 @@ func act(action: String, target: int = -1, place: String = "", text: String = ""
 		args["move"] = move
 	if price >= 0:
 		args["price"] = price
+	if thing >= 0:
+		args["thing"] = thing
 	_send({"type": "intent", "id": id, "verb": "act", "args": args, "seen_tick": view_tick})
 	return id
 
@@ -203,6 +208,8 @@ static func menu(v: Dictionary) -> Array:
 	var out := []
 	var offer: Dictionary = v.get("offer", {})
 	for action in offer:
+		if action in VerbWords.THING_ACTS:
+			continue  # things-1: these name things, and have their own list (inhabit_ui.thing_items)
 		var people: Array = offer[action]
 		if people.is_empty():
 			out.append({"label": action.replace("_", " "), "action": action, "target": -1})

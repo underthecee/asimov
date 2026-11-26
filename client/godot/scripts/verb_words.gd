@@ -55,7 +55,11 @@ const DOING := {
 		"agree": "say yes",
 		"decline": "say no",
 		"say": "say something",
-		"hail": "call out to"}
+		"hail": "call out to",
+		"take": "pick it up",
+		"drop": "put it down",
+		"use": "use it",
+		"hand": "hand it over"}
 const ASKING := {
 		"ask_kin": "You asked %s for food",
 		"ask_food": "You asked %s for food",
@@ -144,7 +148,20 @@ const WHY := {
 		"hailed": "they stop and wait for you",
 		"already stopped": "they're already waiting for you",
 		"not walking": "they aren't walking by",
-		"target not in sight": "they're too far to hear you"}
+		"target not in sight": "they're too far to hear you",
+		"took": "you have it now",
+		"dropped": "it lies where you stood",
+		"handed": "they take it",
+		"picked": "you have %d more food",
+		"nothing there": "it isn't there any more",
+		"not in reach": "it's too far to reach; stand on it or beside it",
+		"can't be carried": "it can't be carried",
+		"hands full": "your hands are full; put something down first",
+		"already carried": "you're already carrying it",
+		"not carried": "you aren't carrying it",
+		"no use": "there's nothing to do with it",
+		"not yours": "it isn't yours to use",
+		"target hands full": "their hands are full"}
 const TO_YOU := {
 		"target not here": "you weren't there any more",
 		"target asleep": "you were asleep",
@@ -172,4 +189,24 @@ const BY_THEM := {
 		"caught": "%s caught you stealing."}
 const HERE_ONLY := ["ask_kin", "ask_food", "buy_from", "steal"]
 const RATED := ["ask_kin", "ask_food", "buy_from", "steal", "buy_food"]
-const PLAYER_ACTIONS := ["buy_food", "go_market", "ask_kin", "ask_food", "buy_from", "steal", "give_food", "give_coin", "seek", "avoid", "work", "socialize", "home", "rest", "explore", "wait", "agree", "decline", "go_to", "say", "walk", "hail"]
+const PLAYER_ACTIONS := ["buy_food", "go_market", "ask_kin", "ask_food", "buy_from", "steal", "give_food", "give_coin", "seek", "avoid", "work", "socialize", "home", "rest", "explore", "wait", "agree", "decline", "go_to", "say", "walk", "hail", "take", "drop", "use", "hand"]
+const THING_ACTS := ["take", "drop", "use", "hand"]
+const THING_NAME := {
+		"berries": "the berry bush",
+		"flower": "the flower",
+		"stall": "the stall",
+		"bench": "your bench",
+		"bed": "your bed"}
+const THING_USE := {
+		"berries": "Pick berries",
+		"stall": "Buy food at the stall",
+		"bench": "Work at your bench",
+		"bed": "Rest in your bed"}
+const THING_TAKE := {
+		"flower": "Pick up the flower"}
+const THING_DROP := {
+		"flower": "Put down the flower"}
+const THING_HAND := {
+		"flower": "Give the flower to %s"}
+const THING_GIFT := {
+		"flower": "a flower"}

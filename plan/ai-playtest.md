@@ -16,7 +16,7 @@ protocol, not the game. The talk criteria and lines 6–7 are read from the serv
 don't depend on how the tester played.
 
 ## Run one session
-1. **World:** as plan/playtest-dec7.md §2 (pod, `asiimov.live --paused --token`, step to the body's waking
+1. **World:** as plan/playtest-dec7.md §2 (pod, `asiimov.live --paused --token --things`, step to the body's waking
    tick, `results/tools/live/pacer.py`). The pacer starts the world when the tester joins and pauses it
    when it leaves.
 2. **Tester:** `python scripts/aiplay.py start DIR --url wss://POD-8765.proxy.runpod.net/ --inhabit N
@@ -46,6 +46,7 @@ Do these, in about this order, in the time you are given:
 2. **Move.** Walk to two places by clicking the map.
 3. **Plan.** Line up two steps with "Plan ahead" and watch them settle.
 4. **Act.** Try each kind of action you are offered at least once. Read what happened and why.
+   Find something lying in the world, pick it up, carry it and give it to someone; pick food where it grows.
 5. **Talk** (at least half your time). Hold three or more conversations of three or more turns, with
    different villagers:
    - small talk, then ask about their day or work, and check the answer against what the screen says of them;
@@ -125,6 +126,16 @@ whoever sets a session up and reads its report: the tester still learns the game
 - `say`: Say a line to someone, naming a villager, with the words; costs the body no time.
 - `walk`: Step to the next tile, naming a tile; costs the body no time.
 - `hail`: Call out to someone, naming a villager; costs the body no time.
+- `take`: Pick up a thing beside you, naming a thing; holds the body 1 sim-minute.
+- `drop`: Put down a thing you carry, naming a thing; holds the body 1 sim-minute.
+- `use`: Use a thing beside you or in your hands, naming a thing; holds the body 1 sim-minute.
+- `hand`: Hand a thing you carry to someone, naming a thing and a villager; holds the body 1 sim-minute.
+
+## What the report adds from Build 1 (Steering 2026-11-23)
+- After a hail: any errand of a hailed villager that then fails with "time ran out" (reach-1).
+- After a flower: what the villager said or did next, in its own words (things-1).
+- Food picked from the woods against food bought, for the session (`used` events against `buy_food`
+  receipts).
 
 ## Limits
 - Since the P-pass (2026-11-18) the UI is drawn 1.25x larger and the right-hand column holds only you, who's

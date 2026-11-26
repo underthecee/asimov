@@ -5,7 +5,8 @@ unattended run (asiimov/soak.py, which counts them and keeps going). Each check 
 violation strings instead of raising, so a long run can report every one it hits.
 """
 from .events import ORIGINS, Event
-from .sim import PERSON_STEPS, RULE_STEPS, STEP_DOS, SUB, Sim
+from .sim import DAWN, PERSON_STEPS, RULE_STEPS, STEP_DOS, SUB, TICKS_PER_DAY, Sim
+from .things import FIXTURES, GROWN, THINGS
 from .worldmap import REACH, SEE, near, on_map, own_tiles, place_at, slot, tile_at, travel_ticks
 
 BOOL_FIELDS = ("asleep", "has_food", "kin", "talk")  # talk: an answer's own hold (say-3)
@@ -109,7 +110,8 @@ class Bodies:
         return self.held in (a, b) and near(self.tile(a, where), self.tile(b, where), tiles)
 
 
-def presence_violations(events: list[Event], start: int, where: dict, bodies: Bodies | None = None) -> list[str]:
+def presence_violations(events: list[Event], start: int, where: dict, bodies: Bodies | None = None,
+                        things: "Things | None" = None) -> list[str]:
     """From the log alone, in event order: every talk, meet, snub, gift, ask, steal and buy happens
     between agents at the same place (never two walkers), and every buy at the market. `where` maps
     agent id to place (None while walking) as of events[start]; it is updated in place.
@@ -126,6 +128,8 @@ def presence_violations(events: list[Event], start: int, where: dict, bodies: Bo
                 out.append(f"event {e.id}: halt of {a}, who isn't walking there")
             elif e.kind != "halt":
                 bodies.see(e, where)
+            if things is not None:  # things-1: a thing is taken, put down and used from its own tile or the next
+                out += things.see(e, bodies, where)
         if e.kind == "activity":
             where[a] = d["place"] if d.get("arrive", e.tick) == e.tick else None
         elif e.kind in ("arrive", "wake", "moved"):  # moved (walk-1): the place holding its tile, or None in the open
@@ -144,6 +148,85 @@ def presence_violations(events: list[Event], start: int, where: dict, bodies: Bo
             ok = bodies is not None and bodies.within(a, other, where, tiles)
         if not ok:
             out.append(f"event {e.id}: {e.kind} between {a} at {where.get(a)!r} and {other} at {where.get(other)!r}")
+    return out
+
+
+class Things:
+    """things-1 (B3.3): the ledger of things rebuilt from the log alone. A thing is made only in a `things`
+    or a `grew` event, goes only in a `used` one, and changes hands or tiles only in `took`, `dropped` and
+    `handed`; so each kind's total changes only there, and the state's ledger must equal this one."""
+
+    def __init__(self, sim: Sim):
+        self.all = {r["id"]: dict(r) for r in sim.state.get("things", {}).get("list", [])}
+        self.made = "things" in sim.state
+        self.next = sim.state.get("things", {}).get("next", 0)
+
+    def see(self, e: Event, bodies: Bodies, where: dict) -> list[str]:
+        """Take one event in; what is wrong with it. `bodies` has already seen it."""
+        d, out = e.data, []
+        if e.kind in ("things", "grew"):
+            if e.kind == "things" and (self.made or not e.parents):
+                out.append(f"event {e.id}: things made twice, or with no possess to cite")
+            if e.kind == "grew" and (not self.made or e.tick % TICKS_PER_DAY != DAWN):
+                out.append(f"event {e.id}: grew before any thing, or away from dawn")
+            self.made = True
+            for t in d["things"]:
+                if t["id"] != self.next or (t["kind"] not in (GROWN if e.kind == "grew" else THINGS)):
+                    out.append(f"event {e.id}: made thing {t}")
+                self.all[t["id"]], self.next = {"id": t["id"], "kind": t["kind"], "at": list(t["at"]), "holder": None}, t["id"] + 1
+            return out
+        if e.kind not in ("took", "dropped", "used", "handed"):
+            return out
+        r, a = self.all.get(d["thing"]), e.actor
+        if r is None or r["kind"] != d["kind"] or a != bodies.held:
+            return [f"event {e.id}: {e.kind} of thing {d['thing']} ({r}) by {a}"]
+        tile = bodies.tile(a, where)
+        beside = r["at"] is not None and near(tile, r["at"], REACH)
+        if e.kind == "took":
+            if not (beside and THINGS[r["kind"]]["carry"] and d["from"] == r["at"]):
+                out.append(f"event {e.id}: took {r} from {tile}")
+            r["at"], r["holder"] = None, a
+        elif e.kind == "dropped":
+            if not (r["holder"] == a and d["at"] == tile):
+                out.append(f"event {e.id}: dropped {r} at {d['at']} from {tile}")
+            r["at"], r["holder"] = list(d["at"]), None
+        elif e.kind == "handed":
+            if r["holder"] != a:
+                out.append(f"event {e.id}: handed {r}, which {a} doesn't carry")
+            r["holder"] = d["to"]
+        else:
+            use = THINGS[r["kind"]]["use"] or {}
+            if not ((beside or r["holder"] == a) and d.get("food") == use.get("food")):
+                out.append(f"event {e.id}: used {r} from {tile}")
+            del self.all[d["thing"]]
+        return out
+
+
+def thing_violations(sim: Sim, things: Things) -> list[str]:
+    """The state's ledger of things against the log's, and each record's shape: exactly one of a tile and a
+    holder, a tile on the map, a fixture where it was put and never held, nobody carrying more than the cap."""
+    st, out = sim.state, []
+    if "things" not in st:
+        return ["things in the log and none in the state"] if things.made or things.all else []
+    cfg = st.get("stakes", {}).get("things")
+    if cfg is None:
+        return ["things in a world whose stakes have none"]
+    have = st["things"]["list"]
+    if [r["id"] for r in have] != sorted(things.all) or any(r != things.all[r["id"]] for r in have) \
+            or st["things"]["next"] != things.next:
+        out.append("the state's things and the log's differ")
+    carried = {}
+    for r in have:
+        ok = r["kind"] in THINGS and (r["at"] is None) != (r["holder"] is None)
+        if ok and r["at"] is not None:
+            ok = on_map(sim.map, r["at"])
+        elif ok:
+            ok = type(r["holder"]) is int and 0 <= r["holder"] < len(st["agents"]) and r["kind"] not in FIXTURES \
+                and THINGS[r["kind"]]["carry"]
+            carried[r["holder"]] = carried.get(r["holder"], 0) + 1
+        if not ok:
+            out.append(f"thing {r}")
+    out += [f"agent {aid} carries {n} things" for aid, n in sorted(carried.items()) if n > cfg["carry"]]
     return out
 
 
@@ -280,6 +363,7 @@ class Checker:
         self.traits = [dict(a["traits"]) for a in sim.state["agents"]]
         self.where = {a["id"]: a["place"] for a in sim.state["agents"]}
         self.bodies = Bodies(sim)  # reach-1: where each one stands, followed from the log
+        self.things = Things(sim)  # things-1: the ledger of things, followed from the log
 
     def before(self, acts=()):
         """Call right before sim.step(acts)."""
@@ -295,7 +379,8 @@ class Checker:
         """Call right after the step; returns its violations, each prefixed with the tick."""
         sim, n0 = self.sim, self._n0
         new = sim.events[n0:]
-        produced = sum(e.data.get("food", 0) for e in new if e.kind == "produce")
+        produced = sum(e.data.get("food", 0) for e in new if e.kind == "produce") \
+            + sum(e.data["food"] for e in new if e.kind == "used")  # things-1: what the ground gave a player
         eaten = sum(1 for e in new if e.kind == "eat")
         spoiled = sum(e.data["market_food_lost"] for e in new if e.kind in ("spoil", "blight"))
         coin_made = sum(e.data.get("coin", 0) for e in new if e.kind == "produce")
@@ -318,7 +403,8 @@ class Checker:
             out.append(f"chest ledger: {chest - self._chest} vs {tithed - spent - alms}")
         out += state_violations(sim)
         out += log_violations(sim.events, n0)
-        out += presence_violations(sim.events, n0, self.where, self.bodies)
+        out += presence_violations(sim.events, n0, self.where, self.bodies, self.things)
+        out += thing_violations(sim, self.things)
         out += deal_violations(sim.events, n0, sim.state.get("player", {}).get("agent"))
         if [a["traits"] for a in sim.state["agents"]] != self.traits:
             out.append("a mind changed someone's traits")

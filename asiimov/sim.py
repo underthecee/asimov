@@ -30,8 +30,9 @@ from .memory import (REFLECT_ASK, assemble_decide, assemble_prompt, is_bare_valu
 from .minds import MindRequest, ReplayDivergence, dispatch
 from .params import generate_population
 from .rng import Rng
-from .verbs import (ACTIVITIES, ANSWER_ACTS, ASK_STEPS, DELIBERATE_ACTIONS, GIFTS, GO_ACTS, HAIL_ACTS, INSTANT_STEPS, MINUTE,
-                    PERSON_STEPS, PLAYER_ACTIONS, RATED_ACTS, REACH_STEPS, RULE_STEPS, SAY_ACTS, STEP_DOS, VERBS,
+from .things import DEFAULTS as THING_DEFAULTS, FIXTURES, GROWN, THINGS
+from .verbs import (ACTIVITIES, ANSWER_ACTS, ASK_STEPS, DELIBERATE_ACTIONS, GIFTS, GO_ACTS, HAIL_ACTS, HAND_ACTS, INSTANT_STEPS, MINUTE,
+                    PERSON_STEPS, PLAYER_ACTIONS, RATED_ACTS, REACH_STEPS, RULE_STEPS, SAY_ACTS, STEP_DOS, THING_ACTS, VERBS,
                     WALK_ACTS, cost as verb_cost, menu as verb_menu)
 from .worldmap import REACH, SEE, WALK, build_map, near, on_map, own_tiles, place_at, position, slot, step_toward, tile_at, travel_ticks
 
@@ -272,6 +273,9 @@ def act_cost(action: str) -> int:
     return verb_cost(action)
 
 
+DAWN = 36  # 06:00, the tick of the day at which the ground makes its things again (things-1)
+
+
 def action_clauses(price: int) -> dict:
     """ACTION_CLAUSES at a food price: the two clauses that name coin say the live price (B5 year-1)."""
     return verb_menu(price)
@@ -296,7 +300,7 @@ SHARE_KIN = 200                                   # family are likelier to agree
 SHARE_MAX = 950
 # Bump on any change that alters the log for the same inputs: old logs then refuse to replay
 # with a clear message instead of diverging. tests/test_world.py pins a golden log hash per version.
-ENGINE_VERSION = "44"  # 44 = verbs-1 (#116): every verb is one row of a table (asiimov/verbs.py: who may use it, what it names, what it needs, its cost, its words, its handler) and the engine's lists, menu, cost and dispatch read it; a pure move, so the log and every prompt are byte-identical: only the engine field differs from 43. 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
+ENGINE_VERSION = "45"  # 45 = things-1 (#118): unique things in one ledger (state["things"], kinds in asiimov/things.py), in a world whose stakes hold `things`: made at the first possess (`things`), grown again at dawn (`grew`), taken, put down and handed over by the player (`took`, `dropped`, `handed`), and gone only by being used (`used`); a fixture's use is the verb done there. A world without the stake, or with no player, has none: only the engine field differs from 44. 44 = verbs-1 (#116): every verb is one row of a table (asiimov/verbs.py: who may use it, what it names, what it needs, its cost, its words, its handler) and the engine's lists, menu, cost and dispatch read it; a pure move, so the log and every prompt are byte-identical: only the engine field differs from 43. 43 = reach-1 (#115): the player's acts reach a villager within a tile across open ground at the act's own time (Sim._near, at the nine sites that asked "same place"), it can call to one walking by within sight (`hail`: the walker stops where it is, a `halt` event re-bases its route, a line or an act on it restarts its wait), and a body is seen one tick behind its route (Sim.pos: a derived position only, nothing logged moves); between two villagers nothing changes, so no player: only the engine field differs from 42. 42 = time-1b (#114): every player act but a line said lands the moment it is recorded (at its own time in the tick, its receipt at once) and holds the body for its cost (COST, one sim-minute; an act inside that is refused "busy"), in place of one act per tick; a line said keeps the tick's fixed point, one a tick; no player: only the engine field differs from 41. 41 = time-1a (#113): a player act carries its time inside the tick (f, recorded), a walk is bounded by walking speed over that time, and an action between ticks is recorded as it arrives (Sim.take); no player: only the engine field differs from 40. 40 = space-1 (#112): every body stands on a tile (Sim.pos: a slot in its place keyed by its id, derived and not stored), and a walk sets out from it; no player: only the engine field differs from 39. 39 = walk-1 (#110): the player walks its body tile by tile (`walk`, a `moved` event, a["at"]); no walk: only the engine field differs from 38. 38 = pace-2 (#104): in a held world with a player, plan and reflect calls fly and land at t+2 (Steering 2026-11-20 09:06Z). 37 = 37 = text-1 (#101): a typed ask is settled by the villager's private yes, with apart-1 (no yes is offered in talk once the two have parted) and think-1 (the private decision may think first; off by default) (Steering 2026-11-19 21:24Z)
 # on 36 = pace-1 (#99): a plan or reflect call waits one tick while a player's line awaits its answer (Steering 07:39Z); on 35 = talk-1g (#97): the injection guard sentence on chip lines (Steering 02:17Z); on 34 = talk-1 (#96)
 # 33 = say-3c (#88): an over-long reply is clipped at a sentence or word, not mid-word; on 32
 # 32 = say-3b (#85): answer prompts name people, leave = avoid them, ids said aloud become names; on 31.
@@ -986,6 +990,8 @@ class Sim:
                 self._settle_ask(q, None if self._idle(agents[self.state["player"]["agent"]]) else 0)
         if tick and tick % TICKS_PER_DAY == 0:
             self._tithe()
+        if "things" in st and tick % TICKS_PER_DAY == DAWN:
+            self._grow_things()
         if "sick" in st:
             self._sickness()
         for a in agents:
@@ -2763,7 +2769,7 @@ class Sim:
         # talk-1 (design §2.4): an active player who moves on has declined, so its nature no longer gives for it.
         for q in (list(self.state["player"].get("asks", [])) if action not in SAY_ACTS + HAIL_ACTS else []):
             self._settle_ask(q, 0, [eid])
-        if action in GO_ACTS + SAY_ACTS + HAIL_ACTS:  # no offer, cooldown or people: checked when applied
+        if action in GO_ACTS + SAY_ACTS + HAIL_ACTS + THING_ACTS:  # no offer, cooldown or people: checked when applied
             self.player_pending[a["id"]] = (eid, action, target, [], [])
             return
         if action in RATED_ACTS and self.state["tick"] < a["cooldown_until"]:
@@ -2792,6 +2798,164 @@ class Sim:
             self._resolve(a, {"action": action, "target": target if action in PERSON_STEPS else None}, eid)
             if action in INSTANT_STEPS + GIFTS:
                 self._keep(a, self.state["agents"][target], eid)
+
+    # ------------------------------------------------------------------ things-1 (B3): one ledger of things
+    def thing(self, tid) -> dict | None:
+        """The record of thing `tid`, or None: {id, kind, at, holder}, exactly one of `at` and `holder` set."""
+        for r in self.state.get("things", {}).get("list", []):
+            if r["id"] == tid:
+                return r
+        return None
+
+    def carried(self, aid: int) -> list[dict]:
+        """What villager `aid` carries, in id order."""
+        return [r for r in self.state.get("things", {}).get("list", []) if r["holder"] == aid]
+
+    def beside(self, a: dict, r: dict, n: int | None = None) -> bool:
+        """Whether the body can touch thing `r` (B1.3 for things): it lies on the body's tile or the next one,
+        at time `n` in SUBths, or at the sim-time being resolved."""
+        return r["at"] is not None and near(self._tile_now(a) if n is None else self.tile_n(a, n), r["at"], REACH)
+
+    def sees_thing(self, a: dict, r: dict) -> bool:
+        """Whether the body sees thing `r` where it lies (B1.4, Steering 2026-11-23 22:03Z): a thing inside a
+        place shows only to a body in that place or beside it; one in the open, to a body within SEE tiles.
+        (A fixture is a map feature and is always drawn: the view lists it whatever this says.)"""
+        if r["at"] is None:
+            return False
+        place = place_at(self.map, r["at"])
+        if place is not None:
+            return a["place"] == place or near(self.tile(a), r["at"], REACH)
+        return near(self.tile(a), r["at"], SEE)
+
+    def thing_owner(self, a: dict, r: dict) -> bool:
+        """Whether a fixture is the body's to use: anyone's, or the one at its own workplace or home."""
+        own = THINGS[r["kind"]]["own"]
+        if own is None:
+            return True
+        place = place_at(self.map, r["at"])
+        return place == (WORKPLACE.get(a["role"]) if own == "work" else a["home"])
+
+    def _new_thing(self, kind: str, at: list) -> dict:
+        th = self.state["things"]
+        r = {"id": th["next"], "kind": kind, "at": list(at), "holder": None}
+        th["next"] += 1
+        th["list"].append(r)
+        return r
+
+    def _grow(self, day: int) -> tuple[list, dict]:
+        """What the ground makes: each growing kind is brought back to its count in its place. Every free
+        tile of the place has a keyed score (stream `things:<kind>:<day>`, index: the tile's number among the
+        place's own tiles) and the lowest scores grow, so a tile's score never depends on what else lies or
+        stands anywhere (T22). Returns the new records and, by kind, the stream it read."""
+        cfg, made, draws = self.state["stakes"]["things"], [], {}
+        taken = {tuple(r["at"]) for r in self.state["things"]["list"] if r["at"] is not None}
+        for kind in GROWN:
+            place = THINGS[kind]["grows"][0]
+            tiles = own_tiles(self.map, place)
+            lying = sum(1 for r in self.state["things"]["list"]
+                        if r["kind"] == kind and r["at"] is not None and place_at(self.map, r["at"]) == place)
+            want = cfg["grows"][kind] - lying
+            if want <= 0:
+                continue
+            stream = f"things:{kind}:{day}"
+            free = [k for k, at in enumerate(tiles) if tuple(at) not in taken]
+            for k in sorted(free, key=lambda k: (self.rng.at(stream, k, 0, 999999), k))[:want]:
+                taken.add(tuple(tiles[k]))
+                made.append(self._new_thing(kind, tiles[k]))
+            draws[kind] = {"stream": stream}
+        return made, draws
+
+    def _make_things(self, eid: int):
+        """B3.3, genesis at the first possess: every fixture on its tile (the stall, a bench at each workplace,
+        a bed in each home) and the first growth, in one `things` event that lists them all."""
+        cfg = self.state["stakes"]["things"]
+        if not (_is_int(cfg.get("carry")) and cfg["carry"] >= 0 and set(cfg.get("grows", ())) == set(GROWN)
+                and all(_is_int(n) and n >= 0 for n in cfg["grows"].values())):
+            raise ValueError(f"things: carry and a count for each of {GROWN} ({cfg!r})")
+        self.state["things"] = {"next": 0, "list": [], "event": None}
+        homes = sorted({a["home"] for a in self.state["agents"]})
+        made = []
+        for kind in FIXTURES:
+            where, (dx, dy) = THINGS[kind]["stands"]
+            for place in {"work": sorted(set(WORKPLACE.values())), "home": homes}.get(where, [where]):
+                ax, ay = self.map["places"][place]["anchor"]
+                at = [ax + dx, ay + dy]
+                made.append(self._new_thing(kind, at if place_at(self.map, at) == place else [ax, ay]))
+        grown, draws = self._grow(self.state["tick"] // TICKS_PER_DAY)
+        self.state["things"]["event"] = self._emit(
+            "things", "rule", None, {"things": [{"id": r["id"], "kind": r["kind"], "at": r["at"]} for r in made + grown],
+                                     "draws": draws}, [eid])
+
+    def _grow_things(self):
+        """B3.3, growth at dawn: a `grew` event listing what the ground made, when it made anything."""
+        grown, draws = self._grow(self.state["tick"] // TICKS_PER_DAY)
+        if grown:
+            self._emit("grew", "rule", None, {"things": [{"id": r["id"], "kind": r["kind"], "at": r["at"]} for r in grown],
+                                              "draws": draws}, [self.state["things"]["event"]])
+
+    def _do_thing(self, a: dict, eid: int, action: str, target):
+        """things-1: the player takes, puts down, uses or hands over a thing. Each success is a rule event
+        citing the act (`took`, `dropped`, `used`, `handed`) and a receipt citing that; each refusal a receipt
+        with its reason. A fixture's use is the verb done there, by that verb's own rule and receipt."""
+        tid = self.events[eid].data["thing"]
+        r, ex = self.thing(tid), {"thing": tid}
+        if r is None:
+            return self._receipt(a, eid, action, False, "nothing there", extra=ex)
+        kind = r["kind"]
+        row, held, ex = THINGS[kind], r["holder"] == a["id"], {"thing": tid, "kind": kind}
+        cap = self.state["stakes"]["things"]["carry"]
+        if action == "take":
+            why = ("already carried" if held else "not in reach" if not self.beside(a, r) else
+                   "can't be carried" if not row["carry"] else "hands full" if len(self.carried(a["id"])) >= cap else None)
+            if why:
+                return self._receipt(a, eid, action, False, why, extra=ex)
+            ev = self._emit("took", "rule", a["id"], {**ex, "from": r["at"]}, [eid])
+            r["at"], r["holder"] = None, a["id"]
+            return self._receipt(a, eid, action, True, "took", extra=ex, parents=[ev])
+        if action == "drop":
+            if not held:
+                return self._receipt(a, eid, action, False, "not carried", extra=ex)
+            at = self._tile_now(a)
+            ev = self._emit("dropped", "rule", a["id"], {**ex, "at": at}, [eid])
+            r["at"], r["holder"] = at, None
+            return self._receipt(a, eid, action, True, "dropped", extra=ex, parents=[ev])
+        if action == "hand":
+            agents = self.state["agents"]
+            if not held:
+                return self._receipt(a, eid, action, False, "not carried", extra=ex)
+            if not (0 <= target < len(agents)) or target == a["id"]:
+                return self._receipt(a, eid, action, False, "unknown target", extra=ex)
+            b, ex = agents[target], {**ex, "to": target}
+            why = ("target not here" if not self._near(a, b) else "target asleep" if b["asleep"] else
+                   "target hands full" if len(self.carried(target)) >= cap else None)
+            if why:
+                return self._receipt(a, eid, action, False, why, extra=ex)
+            ev = self._emit("handed", "rule", a["id"], ex, [eid])
+            r["holder"] = target
+            rid = self._receipt(a, eid, action, True, "handed", extra=ex, parents=[ev])
+            gift = row["words"]["gift"]  # a gift, by give_food's rule: the receiver warms to the giver and may stop to think
+            rel = self._met(b, a["id"])
+            rel["affinity"] = min(1000, rel["affinity"] + 100)
+            rel["cause"] = rid
+            self._met(a, target)
+            self._note(a["id"], f"gave {gift} to {b['name']}")
+            self._note(target, f"{a['name']} gave me {gift}")
+            self._occasion(b, "gift", 400 + b["traits"]["agreeableness"] // 4, a["id"], rid, gift)
+            self._close_contact(a, b, rid)
+            return rid
+        use = row["use"]  # action == "use"
+        why = ("not in reach" if not (held or self.beside(a, r)) else "no use" if use is None else
+               "not yours" if not held and not self.thing_owner(a, r) else None)
+        if why:
+            return self._receipt(a, eid, action, False, why, extra=ex)
+        if "verb" in use:  # a fixture: the verb done here, held to what the body is offered as any act of it is
+            self._weigh(a, self._landing, eid, use["verb"], None)
+            pend = self.player_pending.pop(a["id"], None)
+            return self._apply_act(a, *pend) if pend is not None else None
+        ev = self._emit("used", "rule", a["id"], {**ex, "food": use["food"]}, [eid])
+        self.state["things"]["list"].remove(r)  # used up: a thing goes only here (B3.3)
+        a["inv"]["food"] += use["food"]
+        return self._receipt(a, eid, action, True, "picked", extra={**ex, "food": use["food"]}, parents=[ev])
 
     def _keep(self, a: dict, b: dict, eid: int):
         """reach-1 (Steering 2026-11-23 20:24Z): an act of the player's on a walker it stopped, from within
@@ -3001,6 +3165,8 @@ class Sim:
                 self._release()
             eid = self._emit("possess", "player", aid, {"agent": aid})
             self.state["player"] = {"agent": aid, "event": eid, "order": self.state["tick"]}
+            if "things" in self.state.get("stakes", {}) and "things" not in self.state:
+                self._make_things(eid)  # things-1 (B3.4): they appear at the first possess, and never without one
             return eid
         if kind == "release":
             if "player" not in self.state:
@@ -3027,6 +3193,11 @@ class Sim:
                 raise ValueError(f"act: go_to takes a place on the map and only go_to does ({action!r}, {place!r})")
             if action in HAIL_ACTS and not _is_int(target):
                 raise ValueError(f"act: hail takes a target ({target!r})")
+            thing = act.get("thing")  # things-1: the id of the thing a take, drop, use or hand names
+            if (action in THING_ACTS) != (thing is not None) or action in THING_ACTS and not (
+                    _is_int(thing) and thing >= 0 and (_is_int(target) if action in HAND_ACTS else target is None)):
+                raise ValueError(f"act: {action!r} names a thing by its id, hand also its target, and nothing else does "
+                                 f"({thing!r}, {target!r})")
             to = act.get("to")
             if (action in WALK_ACTS) != (to is not None) or action in WALK_ACTS and not (
                     target is None and on_map(self.map, to)):
@@ -3044,6 +3215,8 @@ class Sim:
                 data["place"], target = place, place  # go_to carries its place where a person act's target is
             if text is not None:
                 data["text"] = text
+            if thing is not None:
+                data["thing"] = thing
             if move is not None:  # talk-1: the chip's move, and the price the client showed for a buy
                 data["move"] = move
                 if price is not None:
@@ -3109,7 +3282,7 @@ class Sim:
                     occupancy[o["place"]].append(o["id"])
         if action in SAY_ACTS:
             self._acted.add(a["id"])  # its line for this tick
-        self._late = late
+        self._late, self._landing = late, occupancy
         self._weigh(a, occupancy, eid, action, target)
         pend = self.player_pending.pop(a["id"], None)
         if pend is not None:

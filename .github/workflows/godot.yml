@@ -74,6 +74,12 @@ jobs:
           for i in $(seq 50); do (echo > /dev/tcp/127.0.0.1/8772) 2>/dev/null && break; sleep 0.2; done
           python scripts/s16b.py op ws://127.0.0.1:8772/ "" step --until 60
           godot --headless --path client/godot --script res://tests/test_walk.gd -- ws://127.0.0.1:8772/ 3
+      - name: Things lie on their tiles; the E list takes, puts down and uses them as the server offers (things-1)
+        run: |
+          python -m asiimov.live --out "$RUNNER_TEMP/things" --agents 25 --things --paused --port 8773 &
+          for i in $(seq 50); do (echo > /dev/tcp/127.0.0.1/8773) 2>/dev/null && break; sleep 0.2; done
+          python scripts/s16b.py op ws://127.0.0.1:8773/ "" step --until 60
+          godot --headless --path client/godot --script res://tests/test_things.gd -- ws://127.0.0.1:8773/ 3
       - name: The inhabitant frame draws the map art and the state, plan and talk panels (V-pass)
         run: |
           pip install pillow
