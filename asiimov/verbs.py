@@ -33,7 +33,8 @@ A row:
   handler  the Sim method that carries it out, called as handler(body, act event id, action, target).
   words    menu: the mind's menu clause ({price}: the food price). label: the player's E-list label (%s:
            the target's name). short: the label on a person's row of buttons. doing: the act in a sentence
-           ("Didn't work: ask for food, because ..."). asking, asked: "You asked %s for food", "asked you
+           ("Didn't work: ask for food, because ..."). whom: the same naming its villager ("ask %s for
+           food"), for a receipt that names one. asking, asked: "You asked %s for food", "asked you
            for food". plan, now: the activity in a plan and under way. seen: what the narrator says the body
            is visibly doing. told: the narrator's line for a receipt, by its why ({a}: who acted, {who}: the
            one it names, {goods} and {role}: what a supplier sells and its trade).
@@ -78,47 +79,47 @@ VERBS = {
     "ask_kin": _row(BOTH, "_do_person", takes="person", among="kin_here", kind="ask", needs=BODY + ("cooldown", "reach", "kin"),
                     step=11, reasons=ASKED_NOW + ("not kin", "kin has nothing to spare", "kin gave food", "kin refused"),
                     menu="ask_kin asks a family member here for 1 food",  # "here" since the map's place check
-                    label="Ask %s (family) for food", short="ask family for food", doing="ask family for food",
+                    label="Ask %s (family) for food", short="ask family for food", doing="ask family for food", whom="ask %s for food",
                     asking="You asked %s for food", asked="asked you for food",
                     told={"kin gave food": ("standout", "{who} in {a}'s family gave them food", "{a}'s family gave them food"),
                           "kin refused": KIN_NONE, "kin has nothing to spare": KIN_NONE}),
     "ask_food": _row(BOTH, "_do_person", takes="person", among="present", kind="ask", needs=BODY + ("cooldown", "reach"),
                      step=12, reasons=ASKED_NOW + ("nothing to spare", "gave", "refused"),
                      menu="ask_food asks a person here for 1 food; they may say no",
-                     label="Ask %s for food", short="ask for food", doing="ask for food",
+                     label="Ask %s for food", short="ask for food", doing="ask for food", whom="ask %s for food",
                      asking="You asked %s for food", asked="asked you for food",
                      told={"gave": GAVE_ASKED, "refused": TURNED_DOWN, "nothing to spare": TURNED_DOWN}),
     "buy_from": _row(BOTH, "_do_person", takes="person", among="present", kind="ask", needs=BODY + ("cooldown", "reach", "coin"),
                      step=13, reasons=ASKED_NOW + ("nothing to spare", "no coin", "sold", "refused"),
                      menu="buy_from offers a person here {price} coin for 1 food; they may say no",
-                     label="Buy food from %s", short="buy food", doing="buy food",
+                     label="Buy food from %s", short="buy food", doing="buy food", whom="buy food from %s",
                      asking="You tried to buy food from %s", asked="wanted to buy food from you",
                      told={"sold": BOUGHT_FROM, "refused": TURNED_DOWN, "nothing to spare": TURNED_DOWN}),
     "steal": _row(BOTH, "_do_person", takes="person", among="present", needs=BODY + ("cooldown", "reach"),
                   step=14, reasons=("target not here", "target has no food", "stolen", "caught", "not in talk"),
                   menu="steal tries to take 1 food from a person here, and you may be caught",
-                  label="Steal food from %s", short="steal food", doing="steal",
+                  label="Steal food from %s", short="steal food", doing="steal", whom="steal from %s",
                   asking="You tried to steal food from %s", asked="tried to steal from you"),
     "give_food": _row(BOTH, "_do_step", takes="person", among="people", needs=BODY + ("reach", "food"), kind="reach",
                       step=9, reasons=("started", "gave", "no food to give", "time ran out", "not in talk"),
                       menu="give_food hands them 1 food",
-                      label="Give food to %s", short="give food", doing="give food",
+                      label="Give food to %s", short="give food", doing="give food", whom="give food to %s",
                       asking="You gave food to %s", asked="gave you food",
                       told={"gave": ("standout", "{a} gave food to {who}")}),
     "give_coin": _row(BOTH, "_do_step", takes="person", among="people", needs=BODY + ("reach", "coin"), kind="reach",
                       step=10, reasons=("started", "gave", "no coin to give", "time ran out", "not in talk"),
                       menu="give_coin hands them {price} coin",
-                      label="Give a coin to %s", short="give a coin", doing="give a coin",
+                      label="Give a coin to %s", short="give a coin", doing="give a coin", whom="give a coin to %s",
                       asking="You gave a coin to %s", asked="gave you a coin",
                       told={"gave": ("standout", "{a} gave coin to {who}")}),
     "seek": _row(BOTH, "_do_step", takes="person", among="people", needs=BODY + ("reach",), kind="reach", step=7,
                  reasons=("started", "time ran out"),
                  menu="seek finds a person and talks with them",
-                 label="Go and find %s", short="go to them", doing="find someone", asked="came to see you"),
+                 label="Go and find %s", short="go to them", doing="find someone", whom="find %s", asked="came to see you"),
     "avoid": _row(BOTH, "_do_step", takes="person", among="people", needs=BODY, kind="hold", step=8,
                   reasons=("started",),
                   menu="avoid keeps you away from them",
-                  label="Keep away from %s", short="keep away", doing="keep away"),
+                  label="Keep away from %s", short="keep away", doing="keep away", whom="keep away from %s"),
     "work": _row(BOTH, "_do_step", needs=BODY, kind="activity", step=1, reasons=("started", "works sick"),
                  menu="work goes to your work for a few hours",
                  label="Go to work", doing="go to work", plan="work", now="Working", seen="at work"),
@@ -141,20 +142,20 @@ VERBS = {
     # The player's alone: held to no offer, and never in a mind's menu.
     "agree": _row(("player",), "_do_answer", takes="person", needs=("awake", "ask"), cost=0,
                   reasons=("said yes", "no ask", "not together"),
-                  label="Say yes to %s", short="give", doing="say yes"),
+                  label="Say yes to %s", short="give", doing="say yes", whom="say yes to %s"),
     "decline": _row(("player",), "_do_answer", takes="person", needs=("awake", "ask"), cost=0,
                     reasons=("said no", "no ask", "not together"),
-                    label="Say no to %s", short="not now", doing="say no"),
+                    label="Say no to %s", short="not now", doing="say no", whom="say no to %s"),
     "go_to": _row(("player",), "_do_go_to", takes="place", needs=BODY, kind="go",
                   reasons=("heading there", "already here", "arrived", "time ran out")),
     "say": _row(("player",), "_do_say", takes="line", needs=("awake", "reach"), cost=0,
                 reasons=("said", "unknown target", "target not here", "target asleep", "price changed",
                          "one act per tick"),
-                short="say something", doing="say something"),
+                short="say something", doing="say something", whom="say something to %s"),
     "walk": _row(("player",), "_walk", takes="tile", needs=("awake",), cost=0, reasons=()),
     "hail": _row(("player",), "_do_hail", takes="person", needs=("awake", "sight", "walker"), cost=0,
                  reasons=("hailed", "already stopped", "unknown target", "target not in sight", "not walking"),
-                 label="Call out to %s", short="call out", doing="call out to"),
+                 label="Call out to %s", short="call out", doing="call out to", whom="call out to %s"),
     # things-1 (B3): what a player does with a thing. The thing's kind (things.THINGS) says whether it can
     # be carried and what using it does, and words the label; a fixture's use is the verb done there, whose
     # own row gives that receipt's reasons.
@@ -168,7 +169,7 @@ VERBS = {
     "hand": _row(("player",), "_do_thing", takes="gift", needs=BODY + ("carried", "reach"),
                  reasons=("handed", "nothing there", "not carried", "unknown target", "target not here", "target asleep",
                           "target hands full"),
-                 doing="hand it over"),
+                 doing="hand it over", whom="hand it over to %s"),
     # deal-1 (B5): the player offers a villager in reach a trade, `give` for `want`, each side counts of food
     # and coin and the ids of things. A limit refuses it at once, in words; nothing wanted is a gift and
     # moves at once; anything else is settled by the villager's nature (a roll, held for the day per exact
@@ -177,7 +178,7 @@ VERBS = {
                   reasons=("offered", "gave", "unknown target", "target not here", "target asleep", "not yours to offer",
                            "not theirs to give", "nothing to spare", "bad terms", "hands full", "target hands full",
                            "too many offers", "already traded", "gone"),
-                  label="Offer %s a trade", short="offer a trade", doing="offer a trade"),
+                  label="Offer %s a trade", short="offer a trade", doing="offer a trade", whom="offer %s a trade"),
     # A plan's block or an intent's step, never an action on the menu (go_market is).
     "shop": _row(("mind",), "_do_step", needs=("coin",), kind="activity", step=6,
                  reasons=("heading to market", "bought", "had enough", "no coin", "no stock", "time ran out"),
@@ -362,7 +363,8 @@ def client_words() -> dict:
 
     def why(key):
         return {name: words[key] for name, words in REASONS.items() if key in words}
-    return {"ACTION": col("label"), "SHORT": col("short"), "DOING": col("doing"), "ASKING": col("asking"),
+    return {"ACTION": col("label"), "SHORT": col("short"), "DOING": col("doing"), "DOING_WHOM": col("whom"),
+            "ASKING": col("asking"),
             "ASKED": col("asked"), "VERB": state("plan"), "NOW": state("now"),
             "WHY": why("you"), "TO_YOU": why("to_you"), "BY_THEM": why("by_them"),
             "HERE_ONLY": list(INSTANT_STEPS), "RATED": list(RATED_ACTS),

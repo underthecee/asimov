@@ -63,7 +63,7 @@ const DOING := {
 		"use": "use it",
 		"hand": "hand it over",
 		"offer": "offer a trade"}
-const DOING_WHOM := {  # the same acts with whom they name, for a receipt's line: no brackets around a name
+const DOING_WHOM := {
 		"ask_kin": "ask %s for food",
 		"ask_food": "ask %s for food",
 		"buy_from": "buy food from %s",

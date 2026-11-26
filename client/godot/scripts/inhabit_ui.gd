@@ -12,6 +12,7 @@ const ACTION := VerbWords.ACTION
 const NOW := VerbWords.NOW
 const SHORT := VerbWords.SHORT
 const DOING := VerbWords.DOING
+const DOING_WHOM := VerbWords.DOING_WHOM
 const WHY := VerbWords.WHY
 const TO_YOU := VerbWords.TO_YOU
 const ANSWERS := ["gave", "sold", "refused", "kin gave food", "kin refused"]  # an ask's yes or no
@@ -301,7 +302,7 @@ static func _receipt(e: Dictionary, d: Dictionary, mine: bool, a: String, me: Di
 		return ((lead % them + ". ") if lead != "" and why not in ["stolen", "caught"] else "") + BY_THEM[why] % them
 	if d.get("to") != null and int(d["to"]) != me_id:  # whom it named, in the line's own words
 		var whom_w := _who(d["to"], me_id, names)
-		var with_whom: String = VerbWords.DOING_WHOM.get(str(d.get("action", "")), "")
+		var with_whom: String = DOING_WHOM.get(str(d.get("action", "")), "")
 		doing = with_whom % whom_w if with_whom != "" else "%s with %s" % [doing, whom_w]
 	return ("Done: %s, %s." if d.get("ok", false) else "Didn't work: %s, because %s.") % [doing, said]
 
