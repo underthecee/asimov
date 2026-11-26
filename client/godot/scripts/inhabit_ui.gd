@@ -156,6 +156,8 @@ static func _line(e: Dictionary, me: Dictionary, names: Dictionary, kinds := {})
 		"activity":
 			if str(d.get("activity", "")) == "home":
 				return "%s head%s home." % [a, "" if mine else "s"]
+			if not d.has("activity"):  # seen from afar (reach-1's sight): where they go, not what for
+				return "%s set%s off for %s." % [a, "" if mine else "s", place(d.get("place"), me)]
 			var v: String = VERB.get(str(d.get("activity", "")), str(d.get("activity", "")))
 			return "%s head%s off to %s at %s." % [a, "" if mine else "s", v, place(d.get("place"), me)]
 		"arrive":

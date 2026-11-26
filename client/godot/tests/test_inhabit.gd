@@ -49,6 +49,16 @@ func _init() -> void:
 		printerr("an ask doesn't read right: %s | %s" % [waiting, said])
 		quit(1)
 		return
+	# Someone setting off: up close you see what for; from afar (reach-1's sight) only where, and the line
+	# has no hole where the purpose would be.
+	var near_off := Words.describe({"kind": "activity", "actor": 4, "origin": "rule",
+			"data": {"activity": "visit", "place": "plaza", "arrive": 61, "from": [0, 0]}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	var far_off := Words.describe({"kind": "activity", "actor": 4, "origin": "rule",
+			"data": {"place": "home_1", "arrive": 61, "from": [0, 0]}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	if not near_off.begins_with("Ari heads off to ") or "  " in near_off or far_off != "Ari sets off for the home 1.":
+		printerr("someone setting off doesn't read right: %s | %s" % [near_off, far_off])
+		quit(1)
+		return
 	# Reasons as words (Steering, 2026-11-10): an act aimed at you carries what its villager said, quoted
 	# under the line and above the yes and no; a bracket in a mind's words is text, never markup.
 	var why := "I need food and my family [b]should[/b] support me"
