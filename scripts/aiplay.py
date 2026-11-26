@@ -20,8 +20,8 @@ the agent can and can't see or do is the client's own UI (plan/ai-playtest.md).
 Godot trusts only its bundled CAs, so the client connects to a local plain-WebSocket relay and Python, which
 trusts the system store, makes the wss:// leg.
 
-DIR holds session.json, input.jsonl (every command with its wall time), shots/NNNN.png and, with --record,
-session.mp4. Needs Xvfb, godot 4.3, python-xlib and pillow (and ffmpeg for --record).
+DIR holds session.json, input.jsonl (every command with its wall time; a hold's is at release, with `pressed` at
+its start), shots/NNNN.png and, with --record, session.mp4. Needs Xvfb, godot 4.3, python-xlib and pillow (and ffmpeg for --record).
 """
 import argparse
 import asyncio
@@ -302,12 +302,13 @@ def do(a):
         codes = [dpy.keysym_to_keycode(keysym(k)) for k in a.keys.split("+")]
         if 0 in codes or not 0 < a.seconds <= 60:
             raise SystemExit(f"hold takes keys on this keyboard and 0 to 60 seconds, not {a.keys!r} {a.seconds}")
+        pressed = round(time.time(), 3)  # the record's own wall is at release; the walk began here
         for code in codes:
             _fake(dpy, X.KeyPress, code)
         time.sleep(a.seconds)
         for code in reversed(codes):
             _fake(dpy, X.KeyRelease, code)
-        rec.update(keys=a.keys, seconds=a.seconds)
+        rec.update(keys=a.keys, seconds=a.seconds, pressed=pressed)
     dpy.close()
     _log(a.dir, **rec)
     if a.shot is not None:
