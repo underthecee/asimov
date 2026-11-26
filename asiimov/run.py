@@ -33,7 +33,8 @@ def llm_from_args(args) -> tuple[LLMMind, dict | None]:
     if not url or not model:
         raise SystemExit("LLM mind needs --pod, or --llm-url and --llm-model")
     return LLMMind(url, model, api_key=key, temperature=getattr(args, "temperature", 0.7),
-                   answer_first=getattr(args, "answer_first", False)), rec
+                   answer_first=getattr(args, "answer_first", False),
+                   plan_lane=getattr(args, "plan_lane", 0) or 0), rec
 
 
 def main():
