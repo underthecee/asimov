@@ -49,6 +49,61 @@ func _init() -> void:
 		printerr("an ask doesn't read right: %s | %s" % [waiting, said])
 		quit(1)
 		return
+	# Someone setting off: up close you see what for; from afar (reach-1's sight) only where, and the line
+	# has no hole where the purpose would be.
+	var near_off := Words.describe({"kind": "activity", "actor": 4, "origin": "rule",
+			"data": {"activity": "visit", "place": "plaza", "arrive": 61, "from": [0, 0]}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	var far_off := Words.describe({"kind": "activity", "actor": 4, "origin": "rule",
+			"data": {"place": "home_1", "arrive": 61, "from": [0, 0]}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	if not near_off.begins_with("Ari heads off to ") or "  " in near_off or far_off != "Ari sets off for the home 1.":
+		printerr("someone setting off doesn't read right: %s | %s" % [near_off, far_off])
+		quit(1)
+		return
+	# The dry run's small faults (2026-11-26). A receipt names whom it was for with no brackets.
+	var called := Words.describe({"kind": "receipt", "actor": 3, "origin": "rule", "tick": 50,
+			"data": {"action": "hail", "ok": true, "why": "hailed", "to": 4}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	var sought := Words.describe({"kind": "receipt", "actor": 3, "origin": "rule", "tick": 50,
+			"data": {"action": "seek", "ok": false, "why": "time ran out", "to": 4}}, {"id": 3, "name": "Me"}, {4: "Ari"})
+	if not called.begins_with("Done: call out to Ari, ") or not sought.begins_with("Didn't work: find Ari, ") or "(" in called + sought:
+		printerr("a receipt doesn't name its villager plainly: %s | %s" % [called, sought])
+		quit(1)
+		return
+	# Whoever stopped for you is named above everyone else, with how long they wait; beside you, they are tagged.
+	var seen_far := {"tick": 60, "place": null, "route": null, "present": [], "offer": {"hail": [9]},
+			"seen": [{"id": 4, "name": "Ari", "role": "guard", "pos": [3, 0]}, {"id": 9, "name": "Bo", "role": "farmer", "pos": [5, 0]}]}
+	var far_wait := Words.here(seen_far, {}, {4: 63}, {4: "Ari"}, 144)
+	var seen_near: Dictionary = seen_far.duplicate(true)
+	seen_near["seen"][0]["reach"] = true
+	var near_wait := Words.here(seen_near, {}, {4: 63}, {4: "Ari"}, 144)
+	var gone_on := Words.here(seen_far, {}, {4: 60}, {4: "Ari"}, 144)
+	if not "Ari has stopped and waits for you until 10:30. Walk up to them." in far_wait \
+			or Words.waiting(seen_far, {4: 63}) != [4] or Words.waiting(seen_near, {4: 63}) != [] \
+			or not "Ari, guard (beside you, waiting for you)" in near_wait or "has stopped" in near_wait \
+			or gone_on != "Someone is walking by. Press T to call out to them.":
+		printerr("the one who stopped for you isn't pointed to: %s | %s | %s" % [far_wait, near_wait, gone_on])
+		quit(1)
+		return
+	# "(has food)" means food to spare, where the server says (an older server's has_food still reads).
+	var crowd := {"tick": 60, "place": "plaza", "route": null, "kin": [], "present": [
+			{"id": 4, "name": "Ari", "role": "guard", "has_food": true, "spare": false},
+			{"id": 5, "name": "Bo", "role": "farmer", "has_food": true, "spare": true},
+			{"id": 6, "name": "Cy", "role": "trader", "has_food": true}]}
+	var tags := Words.here(crowd, {})
+	if tags != "Ari, guard\nBo, farmer (has food)\nCy, trader (has food)":
+		printerr("(has food) doesn't mean food to spare: %s" % tags)
+		quit(1)
+		return
+	# A "could not" on your mind is old news once a later act of yours went through; anything else stays.
+	var stale := {"tick": 50, "place": "plaza", "route": null, "activity": "work", "asleep": false, "hunger": 100,
+			"food": 1, "coin": 3, "occasion": {"why": "failed", "who": null, "text": "you could not offer (nothing to spare)"}}
+	var asked_of: Dictionary = stale.duplicate(true)
+	asked_of["occasion"] = {"why": "asked", "who": 4, "text": "Ari asked you for food"}
+	if not "On your mind: you could not offer" in Words.status(stale, {"id": 3, "name": "Me"}, 144) \
+			or "On your mind" in Words.status(stale, {"id": 3, "name": "Me"}, 144, true) \
+			or not "On your mind: Ari asked you for food" in Words.status(asked_of, {"id": 3, "name": "Me"}, 144, true):
+		printerr("a stale note on your mind isn't cleared, or a live one is")
+		quit(1)
+		return
 	# Reasons as words (Steering, 2026-11-10): an act aimed at you carries what its villager said, quoted
 	# under the line and above the yes and no; a bracket in a mind's words is text, never markup.
 	var why := "I need food and my family [b]should[/b] support me"
@@ -91,7 +146,7 @@ func _init() -> void:
 			"You asked Ari for food. Ari gave you some.", "Ari caught you stealing.", "You gave 3 coin to Ari.",
 			"You set off for the woods; you'll be there in about 30 minutes.", "You're already at your home, so you stay.",
 			"", "Didn't work: ask for food, because you were asleep.", "You stole food from Ari and got away with it.",
-			"Didn't work: give a coin (Ari), because you have no coin to give."]
+			"Didn't work: give a coin to Ari, because you have no coin to give."]
 	if lines != want:
 		printerr("your own outcomes don't read right:\n%s" % "\n".join(lines))
 		quit(1)

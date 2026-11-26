@@ -127,6 +127,7 @@ def view(sim, aid: int) -> dict:
            "recent": list(a["recent"]),
            "present": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "kin": o in fam,
                         "has_food": agents[o]["inv"]["food"] > 0, "asleep": agents[o]["asleep"],  # say-1: who can hear you
+                        "spare": agents[o]["inv"]["food"] > 1,  # food beyond the one they keep: what an ask can reach
                         "pos": _pos(sim, agents[o]), **_carries(sim, a, agents[o])} for o in here],
            # space-1: those in sight who aren't here with it, across open ground. Each with what draws it: its
            # tile, and its route if it is walking. reach-1: one within a tile is in reach (`reach`), may be named

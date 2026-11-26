@@ -316,3 +316,25 @@ def test_a_shop_step_waits_until_it_reaches_the_market():
     sim.step()
     buy = next(e for e in sim.events if e.kind == "receipt" and e.data["action"] == "buy_food")
     assert buy.data["ok"] and buy.tick == arrive and a["intent"]["i"] == 1
+
+
+@pytest.mark.parametrize("families", [1, 7, 16, 25, 40, 60, 100])
+def test_no_drawn_road_tile_lies_inside_a_place_it_doesnt_lead_to(families):
+    """The client draws a dirt path from the plaza's anchor straight to the anchor of each place that isn't a
+    home, about a tile wide (client/godot/scripts/main.gd, _draw_ground). The engine has no roads, so this pins
+    the layout the drawing leans on: every tile such a path covers is open ground or one of its two ends, never
+    a home's lot, at any size of village. (The dry run of 2026-11-26 reported a road inside two homes; the
+    tester had walked on the lots beside it.)"""
+    from asiimov.worldmap import place_at
+    m = build_map([f"home_{i}" for i in range(families)])
+    hub = m["places"]["plaza"]["anchor"]
+    roads = [n for n in m["places"] if n != "plaza" and not n.startswith("home")]
+    assert sorted(roads) == ["field", "market", "woods", "workshop"]
+    for name in roads:
+        (x0, y0), (x1, y1) = hub, m["places"][name]["anchor"]
+        assert x0 == x1 or y0 == y1, "the path is drawn straight: its two anchors share a row or a column"
+        for x in range(min(x0, x1), max(x0, x1) + 1):
+            for y in range(min(y0, y1), max(y0, y1) + 1):
+                # the line runs along the tiles' shared edge, so it covers the tile on each side of it
+                for tile in ([x, y], [x - 1, y] if x0 == x1 else [x, y - 1]):
+                    assert place_at(m, tile) in (None, "plaza", name), (name, tile, place_at(m, tile))

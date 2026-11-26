@@ -63,6 +63,21 @@ const DOING := {
 		"use": "use it",
 		"hand": "hand it over",
 		"offer": "offer a trade"}
+const DOING_WHOM := {
+		"ask_kin": "ask %s for food",
+		"ask_food": "ask %s for food",
+		"buy_from": "buy food from %s",
+		"steal": "steal from %s",
+		"give_food": "give food to %s",
+		"give_coin": "give a coin to %s",
+		"seek": "find %s",
+		"avoid": "keep away from %s",
+		"agree": "say yes to %s",
+		"decline": "say no to %s",
+		"say": "say something to %s",
+		"hail": "call out to %s",
+		"hand": "hand it over to %s",
+		"offer": "offer %s a trade"}
 const ASKING := {
 		"ask_kin": "You asked %s for food",
 		"ask_food": "You asked %s for food",

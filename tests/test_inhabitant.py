@@ -302,3 +302,20 @@ def test_an_act_that_never_reached_the_villager_is_not_witnessed_and_the_village
     people = inhabitant.welcome_world(sim, 4)["people"]
     assert [p["id"] for p in people] == list(range(12))
     assert all(set(p) == {"id", "name", "role"} for p in people)
+
+
+def test_the_view_says_who_has_food_and_who_has_food_to_spare():
+    """`has_food`: any food at all. `spare`: food beyond the one they keep, which is what an ask, a buy or a
+    trade can reach (sim: "nothing to spare" at 1 or less). The dry run of 2026-11-26 read "(has food)" beside
+    a villager whose refusal said they had nothing to spare; the client now tags on `spare`."""
+    sim = Sim(4, 30, StubMind())
+    sim.run_until(TICKS_PER_DAY // 2)
+    seen = set()
+    for a in sim.state["agents"]:
+        if a["asleep"] or a["place"] is None:
+            continue
+        for p in inhabitant.view(sim, a["id"])["present"]:
+            food = sim.state["agents"][p["id"]]["inv"]["food"]
+            assert (p["has_food"], p["spare"]) == (food > 0, food > 1)
+            seen.add(min(food, 2))
+    assert seen == {0, 1, 2}  # none, only the one they keep, and some to spare

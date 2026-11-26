@@ -69,6 +69,8 @@ var walk_at := -99.0         # when the last walk was sent, in seconds
 var walk_place = ""          # the place the engine last said you walked into (null: the open), for the log line
 var reach := -1              # the villager within reach of E, by where they are drawn
 var e_items := []            # the E list while it is open: [{label, action, target}]
+var halts := {}              # villager id -> the tick they walk on: those who stopped for you (a `halt` event)
+var got_past := false        # an act of yours went through since your last one that failed: its "could not" is old news
 var kinds := {}              # deal-1: thing id -> its kind, from every view, so a line can name a thing that moved
 var trade_to := -1           # deal-1: whom the Trade panel is open on, or -1 (closed)
 var trade_n := {"give": {}, "want": {}}  # the counts picked on each side, by name (food, coin, a thing's kind)
@@ -497,6 +499,13 @@ func _catch_up() -> void:
 
 func _feed(evs: Array) -> void:
 	for e in evs:
+		var whose := int(e.get("actor", -1))
+		if e["kind"] == "halt" and whose != int(client.me["id"]):
+			halts[whose] = int(e["data"].get("depart", e["tick"]))  # they stand and wait for you until then
+		elif e["kind"] in ["activity", "arrive"]:
+			halts.erase(whose)  # they walked on
+		elif e["kind"] == "receipt" and whose == int(client.me["id"]):
+			got_past = bool(e["data"].get("ok", false))
 		if e["kind"] == "reply" and e["data"].has("why") and not asked.get(int(e["actor"]), true):
 			e = e.duplicate(true)  # why they can't give is said under an ask for food, not under small talk
 			e["data"].erase("why")
@@ -907,6 +916,7 @@ func _refresh_trade() -> void:
 				sp.max_value = int(caps[k][n])
 				sp.value = mini(int(trade_n[k].get(n, 0)), int(caps[k][n]))
 				sp.suffix = n
+				sp.get_line_edit().expand_to_text_length = true  # "0 flower" whole: a longer name hid its count
 				sp.select_all_on_focus = true
 				sp.value_changed.connect(func(x):
 					trade_n[k][n] = int(x)
@@ -1123,9 +1133,9 @@ func _refresh_inhabit() -> void:
 		_trade_open(int(v["offer"]["offer"][0]))
 		trade_spin["give"]["coin"].value = 1  # shown, not sent
 		trade_spin["want"]["food"].value = 1
-	ui["you"].text = Words.status(v, client.me, per_day)
+	ui["you"].text = Words.status(v, client.me, per_day, got_past)
 	ui["plan"].text = Words.plan(v, per_day, names)
-	ui["here"].text = Words.here(v, doing)
+	ui["here"].text = Words.here(v, doing, halts, names, per_day)
 	ui["asked"].text = Words.asks(v, names, 1.0 / maxf(client.tps, 0.001))  # what waits on your answer, if anything
 	ui["myplan"].text = Plan.lines(plan_q, plan_state, Words.WHY)
 	ui["plan_next"].disabled = plan_state != "hold"
@@ -1398,7 +1408,7 @@ func _draw_inhabitant() -> void:
 			draw_rect(rect, Color(0.95, 0.85, 0.4), false, 2.0)
 		# Only the homes that are yours to know get a label (yours, your family's): at 100 villagers the
 		# others' labels overlap into noise. Public places keep their names.
-		var label: String = "you" if mine else ("family" if kin_homes.has(name) else ("" if name.begins_with("home") else name.replace("_", " ")))
+		var label: String = "your home" if mine else ("family" if kin_homes.has(name) else ("" if name.begins_with("home") else name.replace("_", " ")))
 		if label != "":
 			tags.append([label, rect])
 	var v: Dictionary = client.view
@@ -1444,6 +1454,7 @@ func _draw_inhabitant() -> void:
 	# get no ring and no name.
 	var f := (client.display_tick() - float(v["tick"])) * 600.0
 	var hail := _hailable()
+	var stopped := Words.waiting(v, halts)  # those who stopped for you and stand out of reach: named on the map
 	for p in v.get("seen", []):
 		var tile = Vector2(p["pos"][0], p["pos"][1])
 		if p.has("track"):
@@ -1454,7 +1465,7 @@ func _draw_inhabitant() -> void:
 			var an = client.places[str(p["route"]["to"])]["anchor"]
 			tile = WorldModel.route_pos(p["route"], Vector2i(int(an[0]), int(an[1])), int(client.welcome["world"]["map"]["walk"]), client.display_tick() - 1.0)  # one tick behind its route, as Sim.pos
 		var spot: Vector2 = (tile + Vector2(0.5, 0.5) - lo) * k + origin
-		if p.get("reach", false) or hail.has(int(p["id"])):
+		if p.get("reach", false) or hail.has(int(p["id"])) or stopped.has(int(p["id"])):
 			drawn_at[int(p["id"])] = spot - Vector2(0, px * 0.85)
 		Art.villager(self, spot, str(p.get("role", "")), px * 0.85, false, bool(p.get("asleep", false)))
 	if extra > 0:
@@ -1468,9 +1479,18 @@ func _draw_inhabitant() -> void:
 	if reach >= 0:  # who E and T reach: a ring at their feet and their name
 		draw_arc(drawn_at[reach] + Vector2(0, px * 0.85), px * 0.55, 0.0, TAU, 28, Color(0.55, 0.9, 1.0, 0.95), 2.0)
 		if reach != talking:  # someone walking by, too far for a line: T calls out, and they stop and wait
-			tags.append([str(names.get(reach, "")) + ("  (T: call out)" if hail.has(reach) and not _hearers().has(reach) else ""),
+			tags.append([str(names.get(reach, "")) + ("  (T: call out)" if hail.has(reach) and not _hearers().has(reach) else
+					("  waits for you" if stopped.has(reach) else "")),
 					Rect2(drawn_at[reach] - Vector2(0, 4), Vector2.ZERO)])
+	for id in stopped:
+		if drawn_at.has(id) and id != talking:  # found at a glance: a ring of their own and what they are doing
+			draw_arc(drawn_at[id] + Vector2(0, px * 0.85), px * 0.55, 0.0, TAU, 28, Color(0.55, 0.9, 1.0, 0.95), 2.0)
+			if id != reach:
+				tags.append(["%s waits for you" % str(names.get(id, "Someone")), Rect2(drawn_at[id] - Vector2(0, 4), Vector2.ZERO)])
 	drawn_at[int(client.me["id"])] = at - Vector2(0, px * 1.1)
+	# The body says "you" over its marker, so it is never taken for the ringed villager E and T would reach
+	# (the dry run's tester did), and the home says "your home".
+	tags.append(["you", Rect2(at - Vector2(0, px * 1.25), Vector2.ZERO)])
 	var night := night_shade(fmod(client.display_tick(), float(client.ticks_per_day())) * 24.0 / client.ticks_per_day())
 	if night > 0.0:  # day and night (V-pass, left from #76): over the ground and people, under every word
 		draw_rect(_map_view(), Color(0.04, 0.06, 0.2, night))
