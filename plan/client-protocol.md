@@ -64,7 +64,7 @@ It gets:
   chance-stream fields.
 - `tick.view`, built field by field from `inhabitant.VIEW_KEYS`: `tick, place, route, pos, activity,
   asleep, hunger, food, coin, plan` (activity, start_h, end_h), `recent, present` (id, name, role, kin,
-  has_food, pos), `seen` (space-1, below), `kin` (id, name, home), `market_food` (at the market only), `occasion` (why, who,
+  has_food, spare: food beyond the one they keep, pos), `seen` (space-1, below), `kin` (id, name, home), `market_food` (at the market only), `occasion` (why, who,
   text), `offer` and `cooldown_until`. `offer` maps each action a deliberation would be offered from
   here to the people it may name (empty for non-person actions). The engine checks again when the act
   applies, so an act can still get `"not offered"`. A field added later needs a spec line.

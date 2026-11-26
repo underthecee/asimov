@@ -299,8 +299,10 @@ static func _receipt(e: Dictionary, d: Dictionary, mine: bool, a: String, me: Di
 		var them := _who(whom, me_id, names)
 		var lead: String = ASKING.get(str(d.get("action", "")), "")
 		return ((lead % them + ". ") if lead != "" and why not in ["stolen", "caught"] else "") + BY_THEM[why] % them
-	if d.get("to") != null and int(d["to"]) != me_id:
-		doing += " (" + _who(d["to"], me_id, names) + ")"
+	if d.get("to") != null and int(d["to"]) != me_id:  # whom it named, in the line's own words
+		var whom_w := _who(d["to"], me_id, names)
+		var with_whom: String = VerbWords.DOING_WHOM.get(str(d.get("action", "")), "")
+		doing = with_whom % whom_w if with_whom != "" else "%s with %s" % [doing, whom_w]
 	return ("Done: %s, %s." if d.get("ok", false) else "Didn't work: %s, because %s.") % [doing, said]
 
 
@@ -399,7 +401,9 @@ static func reads_like_ask(text: String) -> bool:
 	return _has(HINT_FOOD, text) and (_has(HINT_ASK, text) or _has(HINT_BUY, text))
 
 
-static func status(v: Dictionary, me: Dictionary, per_day: int) -> String:
+static func status(v: Dictionary, me: Dictionary, per_day: int, got_past: bool = false) -> String:
+	## `got_past`: an act of yours has gone through since the last one that failed, so a "could not" still on the
+	## body's mind is old news and isn't shown.
 	var lines := ["[b]%s[/b], %s" % [me.get("name", "?"), me.get("role", "")], clock(int(v["tick"]), per_day)]
 	if v["asleep"]:
 		lines.append("Asleep at %s." % place(v["place"], me))
@@ -425,7 +429,7 @@ static func status(v: Dictionary, me: Dictionary, per_day: int) -> String:
 		lines.append("[color=#f0c060]%s[/color]" % need)
 	if v.has("market_food"):
 		lines.append("The market has %d food." % int(v["market_food"]))
-	if v.get("occasion") != null:
+	if v.get("occasion") != null and not (got_past and str(v["occasion"].get("why", "")) == "failed"):
 		lines.append("[color=#f0c060]On your mind: %s.[/color]" % no_ids(str(v["occasion"]["text"])))
 	return "\n".join(lines)
 
@@ -512,24 +516,41 @@ static func near(v: Dictionary) -> Dictionary:
 	return out
 
 
-static func here(v: Dictionary, doing: Dictionary) -> String:
+static func waiting(v: Dictionary, halts: Dictionary) -> Array:
+	## Those who stopped for you and still stand out of reach: `halts` is id -> the tick they walk on (from the
+	## `halt` events). Each is in sight, not at your place and not within a tile of you. Ids, in the view's order.
+	var out := []
+	for p in v.get("seen", []):
+		if halts.has(int(p["id"])) and int(v["tick"]) < int(halts[int(p["id"])]) and not p.get("reach", false):
+			out.append(int(p["id"]))
+	return out
+
+
+static func here(v: Dictionary, doing: Dictionary, halts: Dictionary = {}, names: Dictionary = {}, per_day: int = 144) -> String:
 	var close := in_reach(v)
+	var out := []
+	for id in waiting(v, halts):  # the one you called to: named, and where to go, above everyone else
+		out.append("[color=#8ce6ff]%s has stopped and waits for you until %s. Walk up to them.[/color]" % [
+				str(names.get(id, "Someone")).replace("[", "[lb]"), clock(int(halts[id]), per_day).split(", ")[1]])
 	if v["present"].is_empty() and close.is_empty():
+		if not out.is_empty():
+			return "\n".join(out)
 		if v["place"] != null:
 			return "Nobody else is here."
 		if not v.get("offer", {}).get("hail", []).is_empty():
 			return "Someone is walking by. Press T to call out to them."
 		return "You're on the road." if v.get("route") != null else "Nobody: you're out in the open. Walk into a place to meet people."
 	var kin := near(v)
-	var out := []
 	for p in v["present"] + close:
 		var tags := []
 		if kin.get(int(p["id"]), false):
 			tags.append("family")
-		if p.get("has_food", false):
+		if p.get("spare", p.get("has_food", false)):  # food beyond the one they keep: what an ask or a trade can reach
 			tags.append("has food")
 		if p.get("reach", false):
 			tags.append("beside you")
+		if halts.has(int(p["id"])) and int(v["tick"]) < int(halts[int(p["id"])]):
+			tags.append("waiting for you")
 		var line := "%s, %s" % [p["name"], p["role"]]
 		if not tags.is_empty():
 			line += " (" + ", ".join(tags) + ")"

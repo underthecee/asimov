@@ -116,7 +116,7 @@ What an inhabitant gets, and nothing more (the server filters; the client is nev
 - Per tick, a `view` written field by field, as a **whitelist**, never a copy of `Sim._view` (which
   carries `traits`): `tick`, `place`, `route` (from, to, depart, arrive), `pos`, `activity`, `asleep`,
   `hunger`, `food`, `coin`, `plan` (blocks: activity, start_h, end_h), `recent` (its notes),
-  `present` (each: id, name, role, kin, has_food, pos), `kin` (each: id, name, home), `market_food`
+  `present` (each: id, name, role, kin, has_food, spare, pos), `kin` (each: id, name, home), `market_food`
   (only at the market), `occasion` (why and who, as the deliberate situation words it), `offer`
   (the actions `_offer` allows now, with the people each may name), `cooldown_until`, `asks` (player-ask-1, below), `food_price` (the
   price in force, which every villager's prompt already states) and `intent` (its own villager's current
