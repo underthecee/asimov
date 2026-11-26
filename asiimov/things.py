@@ -13,6 +13,9 @@ sim-minutes, where it first stands or grows, and its words. A new kind is a row 
   stands  for a fixture: the places that hold one ("market", "work": every workplace, "home": every home)
           and its tile there, as an offset from the place's anchor.
   grows   for what the ground makes: the place, and how many lie there after each dawn.
+  worth   for a kind that can be carried: what one is worth in coin when an offer is weighed (deal-1, B5:
+          Sim._offer_limit). Food is worth the stall's price and a coin 1; a fixture has no worth, and can't
+          be offered.
   words   name ("the flower"), and the player's label for each verb it allows.
 """
 
@@ -21,7 +24,7 @@ CARRY = 4  # things a body carries at most
 THINGS = {
     "berries": {"carry": False, "use": {"food": 1}, "own": None, "cost": 1, "stands": None, "grows": ("woods", 6),
                 "words": {"name": "the berry bush", "use": "Pick berries"}},
-    "flower": {"carry": True, "use": None, "own": None, "cost": 1, "stands": None, "grows": ("woods", 4),
+    "flower": {"carry": True, "use": None, "own": None, "cost": 1, "stands": None, "grows": ("woods", 4), "worth": 1,
                "words": {"name": "the flower", "take": "Pick up the flower", "drop": "Put down the flower",
                          "hand": "Give the flower to %s", "gift": "a flower"}},
     "stall": {"carry": False, "use": {"verb": "buy_food"}, "own": None, "cost": 1, "stands": ("market", (0, 0)),
@@ -37,6 +40,8 @@ FIXTURES = tuple(k for k, row in THINGS.items() if row["stands"])
 GROWN = tuple(k for k, row in THINGS.items() if row["grows"])
 CARRIED = tuple(k for k, row in THINGS.items() if row["carry"])
 assert not set(FIXTURES) & set(CARRIED) and not set(FIXTURES) & set(GROWN)
+assert all((type(row.get("worth")) is int and row["worth"] >= 0) == row["carry"] for row in THINGS.values()), \
+    "every kind that can be carried has a worth, and nothing else does (deal-1)"
 
 # The world's parameters for things, as genesis records them under stakes["things"] (a world without the
 # key has no things: every world before things-1, and every world with no player).

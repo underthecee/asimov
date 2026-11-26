@@ -232,7 +232,9 @@ GOLDEN = {"1": "fa6d1e9898c97fe570590e1ad322d952375b2941c4828001b5ea933c6e4d369b
           "verbs-1": "c979925fc91b0fec8d2b97a82caf49b51ab61cb926e73213b318d2f0e41be138",  # verbs-1: every verb is one row of a table the engine's lists, menu, cost and dispatch read, on reach-1, before its number; a pure move: only the engine field differs (tests/test_verbs.py holds that with a player too)
           "44": "4ad8b46ce9d32590505fe90edb5e5f85e4986e2498c12b28f5a22cf311ae4d7f",  # verbs-1 (#116), one table of verbs, a pure move; the log and every prompt differ from 43 only in the engine field
           "things-1": "a432d8d9e4838e611201c3539c313d0b6eeba64897151516bbb2338d96001dce",  # things-1: unique things in one ledger for a world whose stakes hold `things`, from its first possess, on verbs-1, before its number; without the stake or a player: only the engine field differs
-          "45": "f2834991d8139a7c39f8243d51bebc431d48b5d23c5a2bb25de6fe39d8ed8dc9"}  # things-1 (#118), the same world as 44 with no player, engine field aside: things are made at the first possess, in a world started with --things
+          "45": "f2834991d8139a7c39f8243d51bebc431d48b5d23c5a2bb25de6fe39d8ed8dc9",  # things-1 (#118), the same world as 44 with no player, engine field aside: things are made at the first possess, in a world started with --things
+          "deal-1": "cdf6bbd71ed835ea4f426c111b6cec3a057e9fdf97c50763da33c4b9e407ea71",  # deal-1: the player's keyed offer (`offer`, `offered`, a `decided` roll, a spoken answer, one `deal`), on things-1, before its number; no player, or no offer: only the engine field differs
+          "46": "58603eeb7f1197bd642878158aeafaa4c6ce4ea3ad441800416e877468bcbe45"}  # deal-1 (#119), the same world as 45 with no player, engine field aside: the player's offer is settled by a keyed roll and answered in the villager's words
 
 
 def test_log_changes_bump_the_engine_version():

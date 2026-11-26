@@ -36,8 +36,8 @@ from collections import defaultdict
 from . import inhabitant, narrate, persist
 from .llm import SCHEMAS
 from .minds import NoisyMind, ScriptMind, StubMind
-from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, HAIL_ACTS, HAND_ACTS, THING_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
-                  TICKS_PER_DAY, act_cost)
+from .sim import (CONSENTS, ENGINE_VERSION, GO_ACTS, HAIL_ACTS, HAND_ACTS, OFFER_ACTS, THING_ACTS, PLAYER_ACTIONS, SAY_ACTS, SAY_MAX, SUB, TALK_DEFAULTS, TALK_MOVES, WALK_ACTS,
+                  TICKS_PER_DAY, act_cost, offer_empty, offer_side_ok)
 from .things import DEFAULTS as THING_DEFAULTS
 from .worldmap import bounds, on_map
 
@@ -178,7 +178,9 @@ class LiveRunner:
                 "possess": {"agent": [0, n - 1]}, "release": {},
                 "act": {"action": list(PLAYER_ACTIONS), "target": [0, n - 1],
                         "place": sorted(self.sim.map["places"]),  # place: go_to's, and only go_to's
-                        "to": bounds(self.sim.map)}}  # to: walk's tile, within [x0, y0, x1, y1] (walk-1)
+                        "to": bounds(self.sim.map),  # to: walk's tile, within [x0, y0, x1, y1] (walk-1)
+                        # give, want: an offer's two sides (deal-1), each {"food": n, "coin": n, "things": [ids]}
+                        "give": ["food", "coin", "things"], "want": ["food", "coin", "things"]}}
 
     def pulls(self, m: dict) -> bool:
         """Whether an inhabitant's act pulls the next tick forward. Every act does but a walk (time-1a): a
@@ -272,7 +274,12 @@ class LiveRunner:
             walk, to = args.get("action") in WALK_ACTS, args.get("to")  # walk-1: a tile, and nothing else
             move, price = args.get("move"), args.get("price")  # talk-1: the chip on a say, and a buy's shown price
             thing = args.get("thing")  # things-1: the thing a take, drop, use or hand names, by its id
-            ok = set(args) <= {"action", "target", "place", "text", "move", "price", "to", "thing"} \
+            give, want = args.get("give"), args.get("want")  # deal-1: the two sides of an offer
+            offer = args.get("action") in OFFER_ACTS
+            ok = set(args) <= {"action", "target", "place", "text", "move", "price", "to", "thing", "give", "want"} \
+                and (give is not None or want is not None) == offer \
+                and (not offer or t is not None and offer_side_ok(give) and offer_side_ok(want)
+                     and not (offer_empty(give) and offer_empty(want))) \
                 and (thing is not None) == (args.get("action") in THING_ACTS) \
                 and (thing is None or _is_int(thing) and thing >= 0 and (t is not None) == (args["action"] in HAND_ACTS)) \
                 and isinstance(args.get("action"), str) \
@@ -297,6 +304,8 @@ class LiveRunner:
                 act["text"] = text
             if thing is not None:
                 act["thing"] = thing
+            if offer and ok:
+                act["give"], act["want"] = give, want
             if move is not None:
                 act["move"] = move
                 if price is not None:
@@ -957,7 +966,7 @@ class Hub:
                 await self.reply_hold.hold(self.runner, events)
             p = self.runner.sim.state.get("player")
             if self.pull_min is not None and p is not None and any(
-                    e.kind == "said" and e.actor == p["agent"] for e in events):
+                    e.kind in ("said", "offered") and e.actor == p["agent"] for e in events):
                 # pt8 (Steering 2026-11-16 10:40Z): a line said this tick is answered in the next one, so pull
                 # that tick too; the player's words would otherwise wait out the pace for their answer.
                 self.pull, self.pull_why = True, "reply"

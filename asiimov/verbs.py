@@ -14,8 +14,8 @@ A row:
            or an intent step, where it has a `step` rank). "player": a player's act may name it. "rule": only
            a rule of the world starts it.
   takes    what it names: None, "person" (a villager's id), "place" (a place on the map), "tile" ([x, y]),
-           "line" (a person and the words said to them), "thing" (a thing's id; things-1) or "gift" (a thing
-           and the person it is handed to).
+           "line" (a person and the words said to them), "thing" (a thing's id; things-1), "gift" (a thing
+           and the person it is handed to) or "offer" (a person and the two sides of a trade; deal-1).
   among    for a mind's person verb, the ids its reply may name: "kin_here", "present" or "people".
   needs    what must hold for it to work. "awake" and "free" (the body is not held by an act before it) are
            the player's body's; "cooldown" holds a player's rolled act to the deliberation cooldown; the rest
@@ -169,6 +169,15 @@ VERBS = {
                  reasons=("handed", "nothing there", "not carried", "unknown target", "target not here", "target asleep",
                           "target hands full"),
                  doing="hand it over"),
+    # deal-1 (B5): the player offers a villager in reach a trade, `give` for `want`, each side counts of food
+    # and coin and the ids of things. A limit refuses it at once, in words; nothing wanted is a gift and
+    # moves at once; anything else is settled by the villager's nature (a roll, held for the day per exact
+    # terms), which the villager then answers aloud, and a yes moves both sides in one `deal`.
+    "offer": _row(("player",), "_do_offer", takes="offer", needs=BODY + ("reach",),
+                  reasons=("offered", "gave", "unknown target", "target not here", "target asleep", "not yours to offer",
+                           "not theirs to give", "nothing to spare", "bad terms", "hands full", "target hands full",
+                           "too many offers", "already traded", "gone"),
+                  label="Offer %s a trade", short="offer a trade", doing="offer a trade"),
     # A plan's block or an intent's step, never an action on the menu (go_market is).
     "shop": _row(("mind",), "_do_step", needs=("coin",), kind="activity", step=6,
                  reasons=("heading to market", "bought", "had enough", "no coin", "no stock", "time ran out"),
@@ -268,6 +277,13 @@ REASONS = {
     "no use": {"you": "there's nothing to do with it"},
     "not yours": {"you": "it isn't yours to use"},
     "target hands full": {"you": "their hands are full"},
+    "offered": {"you": "they heard your offer"},
+    "not yours to offer": {"you": "you don't have what you offered"},
+    "not theirs to give": {"you": "they don't have what you asked for"},
+    "bad terms": {"you": "they want no dealings with you"},
+    "too many offers": {"you": "they've heard enough offers from you today"},
+    "already traded": {"you": "you've already made that trade with them today"},
+    "gone": {"you": "you had walked away before they could answer"},  # an offer's deal (deal-1), never a receipt
 }
 
 
@@ -299,6 +315,7 @@ WALK_ACTS = _names(lambda r: r["takes"] == "tile")
 HAIL_ACTS = _names(lambda r: "walker" in r["needs"])
 THING_ACTS = _names(lambda r: r["takes"] in ("thing", "gift"))            # things-1: an act that names a thing
 HAND_ACTS = _names(lambda r: r["takes"] == "gift")                        # and the person it goes to
+OFFER_ACTS = _names(lambda r: r["takes"] == "offer")                      # deal-1: an act that names a trade's two sides
 NO_TARGET = [name for name in DELIBERATE_ACTIONS if VERBS[name]["takes"] is None]   # the reply schema's lists
 PERSON_ACTIONS = tuple((name, VERBS[name]["among"]) for name in DELIBERATE_ACTIONS if VERBS[name]["takes"] == "person")
 MENU = {name: VERBS[name]["words"]["menu"] for name in DELIBERATE_ACTIONS}
@@ -349,7 +366,7 @@ def client_words() -> dict:
             "ASKED": col("asked"), "VERB": state("plan"), "NOW": state("now"),
             "WHY": why("you"), "TO_YOU": why("to_you"), "BY_THEM": why("by_them"),
             "HERE_ONLY": list(INSTANT_STEPS), "RATED": list(RATED_ACTS),
-            "PLAYER_ACTIONS": list(PLAYER_ACTIONS), "THING_ACTS": list(THING_ACTS),
+            "PLAYER_ACTIONS": list(PLAYER_ACTIONS), "THING_ACTS": list(THING_ACTS), "OFFER_ACTS": list(OFFER_ACTS),
             # things-1: a thing's name and the label of each verb its kind allows (things.THINGS)
             **{"THING_" + key.upper(): words for key, words in things.client_words().items()}}
 
@@ -388,7 +405,8 @@ def player_list() -> str:
         what = (w.get("label") or _UNLABELLED[name]).replace("%s", "someone")
         names = {None: "", "person": ", naming a villager", "place": ", naming a place", "tile": ", naming a tile",
                  "line": ", naming a villager, with the words", "thing": ", naming a thing",
-                 "gift": ", naming a thing and a villager"}[row["takes"]]
+                 "gift": ", naming a thing and a villager",
+                 "offer": ", naming a villager, what you give and what you want"}[row["takes"]]
         held = f"holds the body {row['cost']} sim-minute" if row["cost"] else "costs the body no time"
         lines.append(f"- `{name}`: {what}{names}; {held}.")
     return "\n".join(lines) + "\n"

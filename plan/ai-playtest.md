@@ -130,12 +130,17 @@ whoever sets a session up and reads its report: the tester still learns the game
 - `drop`: Put down a thing you carry, naming a thing; holds the body 1 sim-minute.
 - `use`: Use a thing beside you or in your hands, naming a thing; holds the body 1 sim-minute.
 - `hand`: Hand a thing you carry to someone, naming a thing and a villager; holds the body 1 sim-minute.
+- `offer`: Offer someone a trade, naming a villager, what you give and what you want; holds the body 1 sim-minute.
 
 ## What the report adds from Build 1 (Steering 2026-11-23)
 - After a hail: any errand of a hailed villager that then fails with "time ran out" (reach-1).
 - After a flower: what the villager said or did next, in its own words (things-1).
 - Food picked from the woods against food bought, for the session (`used` events against `buy_food`
   receipts).
+- Offers (deal-1): a villager's "offer a trade" button, or the E list's "Offer X a trade", opens the Trade
+  panel in the middle column: set what you give and what you want in the count boxes and press Offer. Report
+  each offer's terms, the villager's words, and what moved (`offered`, `reply`, `deal`); any answer whose words
+  don't match what happened; and an offer made near a villager's bedtime that got no answer.
 
 ## Limits
 - Since the P-pass (2026-11-18) the UI is drawn 1.25x larger and the right-hand column holds only you, who's

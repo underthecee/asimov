@@ -22,7 +22,8 @@ SEEN = {"activity": ("activity", "place", "arrive", "from"), "arrive": ("place",
         "sleep": (), "talk": ("with", "place", "gossip"), "meet": ("with", "place"), "snub": ("with",),
         "eat": ("household",), "sell": ("food",), "fire": ("family",), "ask": ("action", "to"),
         "said": ("with", "text", "place", "move", "price"), "reply": ("with", "says", "answer"),  # say-1, talk-1
-        "deal": ("move", "from", "to", "food", "coin", "ok", "why"),  # talk-1: what a yes moved, in plain sight
+        "deal": ("move", "from", "to", "food", "coin", "gives", "gets", "ok", "why"),  # talk-1, deal-1: what a yes moved, in plain sight
+        "offered": ("with", "gives", "gets", "place"),  # deal-1: a keyed offer, put to someone in plain sight
         "halt": ("pos", "place", "depart", "arrive")}  # reach-1: a walker the player hailed or spoke to stops
 SEEN_NAMING = {**SEEN, "receipt": ("action", "ok", "why", "to", "answered")}  # also a receipt for an act aimed at it
 # Another's act aimed at it that failed before reaching it: it saw nothing (and "no coin" would show another's
@@ -31,7 +32,7 @@ UNSEEN_WHY = ("target not here", "target asleep", "no coin")
 # reach-1 (Steering 2026-11-23 20:26Z): what sight alone shows of someone who is neither at its place nor in
 # reach: who stands where, and that someone spoke, without the words. No activity, sleep, meal, sale or deal.
 SIGHT = {"activity": ("place", "arrive", "from"), "arrive": ("place",), "halt": ("pos", "place", "depart", "arrive"),
-         "talk": ("with", "place"), "said": ("with", "place"), "reply": ("with",)}
+         "talk": ("with", "place"), "said": ("with", "place"), "reply": ("with",), "offered": ("with", "place")}
 
 
 def _pos(sim, a) -> list[int]:
@@ -86,6 +87,13 @@ def passing(sim, aid: int) -> dict:
     return out
 
 
+def _carries(sim, a, o) -> dict:
+    """deal-1: the things someone in reach holds in their hands, in plain sight, so an offer can name one."""
+    if "things" not in sim.state or not sim.reach(a, o):
+        return {}
+    return {"carries": [{"id": r["id"], "kind": r["kind"]} for r in sim.carried(o["id"])]}
+
+
 def _route(r) -> dict | None:
     return None if r is None else {"from": list(r["from"]), "to": r["to"], "depart": r["depart"], "arrive": r["arrive"]}
 
@@ -119,7 +127,7 @@ def view(sim, aid: int) -> dict:
            "recent": list(a["recent"]),
            "present": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "kin": o in fam,
                         "has_food": agents[o]["inv"]["food"] > 0, "asleep": agents[o]["asleep"],  # say-1: who can hear you
-                        "pos": _pos(sim, agents[o])} for o in here],
+                        "pos": _pos(sim, agents[o]), **_carries(sim, a, agents[o])} for o in here],
            # space-1: those in sight who aren't here with it, across open ground. Each with what draws it: its
            # tile, and its route if it is walking. reach-1: one within a tile is in reach (`reach`), may be named
            # in an act, and shows whether it sleeps; the rest are seen standing or walking, and no more.
@@ -128,7 +136,8 @@ def view(sim, aid: int) -> dict:
            "seen": [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"],
                      "place": agents[o]["place"], "pos": _pos(sim, agents[o]), "route": _route(agents[o]["route"]),
                      **going.get(o, {}),
-                     **({"reach": True, "asleep": agents[o]["asleep"]} if sim.reach(a, agents[o]) else {})}
+                     **({"reach": True, "asleep": agents[o]["asleep"], **_carries(sim, a, agents[o])}
+                        if sim.reach(a, agents[o]) else {})}
                     for o in sight if o not in here]
            + [{"id": o, "name": agents[o]["name"], "role": agents[o]["role"], "place": None,
                "pos": g["track"][0][1:], "route": None, **g}  # not in sight yet: where it will first be seen
@@ -185,6 +194,10 @@ def view(sim, aid: int) -> dict:
             for verb, ids in (("take", take), ("use", use), ("drop", [r["id"] for r in mine]), ("hand", hand)):
                 if ids:
                     out["offer"][verb] = ids
+    if not a["asleep"]:  # deal-1: whom it can put an offer to: anyone awake in reach (the engine's limits say the rest)
+        to = [o for o in near_ids(sim, aid) if not agents[o]["asleep"]]
+        if to:
+            out["offer"]["offer"] = to
     assert set(out) <= set(VIEW_KEYS), "a view field outside the spec's list"
     return out
 

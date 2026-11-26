@@ -369,11 +369,13 @@ byte-identical to reach-1's (only the engine field differs).
   the body's tile or the next one at the act's own time. `hand` needs the receiver in reach (`_near`),
   awake, and with a hand free; a villager holds what it is handed (the record's `holder`; no villager field)
   and does nothing with it in Build 1.
-- **A gift of a thing follows give_food's rule:** the receiver warms to the giver by 100, both remember it
+- **A gift of a thing follows give_food's rule:** the receiver warms to the giver (by 100 in things-1; from
+  deal-1 by what the thing is worth, see Offers below), both remember it
   ("gave a flower to X", "Y gave me a flower"), and the receiver may stop to think ("Y gave you a flower").
   That is the only text a thing puts in a prompt. `tests/test_things.py` holds the row check Steering asked
   for: per kind, the receiver's prompt differs from its prompt after a gift of food only in that sentence
-  and that note, which name exactly the giver and the thing.
+  and that note, which name exactly the giver and the thing (and, from deal-1, in the receiver's affinity
+  line for the giver, checked to the number).
 - **The view** (B3.5): `things`, `carried`, and `offer.take`, `use`, `drop`, `hand` (plan/client-protocol.md).
   A thing inside a place shows only to a body in that place or beside it; one in the open, within 6 tiles;
   a fixture always. A fixture's use is offered only beside it, to its owner, when its verb is offered.
@@ -381,6 +383,59 @@ byte-identical to reach-1's (only the engine field differs).
   equal the state's; a take, a put-down and a use happen within a tile of the thing; each record has one of
   a tile and a holder, a tile on the map, a known kind; no fixture is held; nobody carries more than the cap.
 - **Tests:** `tests/test_things.py` (21) and `client/godot/tests/test_things.gd`.
+
+## Offers (deal-1, plan/v0-contracts-spec.md B5; Steering 2026-11-25 04:00Z, 04:06Z, 04:35Z, 04:38Z and 04:50Z)
+- **One verb, a row of the verb table, the player's alone:** `offer`, naming a villager in reach and two
+  sides, what the player gives and what it wants: counts of food and coin and things by id. It costs a
+  sim-minute. The world's rule settles it; the villager only says the answer in its own words.
+- **Limits first** (`Sim._offer_limit`), each a worded receipt with no roll and no mind call: out of reach,
+  asleep, the player lacks what it offers, the villager lacks what is wanted, the villager would keep under
+  1 food, a grudge (affinity under -300), or hands that would be over-full. The same check runs again when
+  the answer's prompt is built and again after the answer's words.
+- **A gift** (nothing wanted) moves at once, by give_food's rule: the receiver warms, both remember it, and
+  the receiver may stop to think.
+- **One warmth rule for every gift** (`Sim._gift_warmth`; Steering 04:35Z and 04:38Z): 100 x min(worth,
+  price) // price. give_food (1 food) and give_coin (a meal's price) are worth the full 100, as before. An
+  offer's gift, and from deal-1 on a thing handed over with `hand`, warm by what they are worth: a picked
+  flower (worth 1) or a single coin gives 100 // price, where things-1 gave a handed flower 100. Affinity
+  feeds the next offer's limit, so warmth has to cost what it is worth.
+- **The roll** (`Sim._offer_roll_limit`): each side is worth its coin (food at the stall's price, a coin 1, a
+  thing its kind's `worth` in `asiimov/things.py`; every carried kind has one). The terms run from ask_food's
+  base (100, nothing for something) through buy_from's (350, an even trade) to 950 (something for nothing);
+  the villager's agreeableness, its affinity for the player and kinship are added as `_share_answer` adds
+  them, clamped to 0..950. So 1 food for its price has buy_from's odds and a bare ask for 1 food has
+  ask_food's (ask_kin's for family); `tests/test_deal.py` pins both against the real acts in twin worlds.
+  **The loss cap:** where the villager would be out more than one food's price, the limit is multiplied by
+  price / loss, so a lopsided offer's odds fall as fast as its stake grows.
+- **Keyed and held:** one roll per exact terms (things by kind) per pair per day, on the stream
+  `offer:<receiver>:<giver>:<terms>` at index day (T22), written as `decided` with the roll, the limit and
+  what it rests on. A second offer of the same terms finds the held answer; at most 3 different offers are
+  decided per pair per day (`too many offers`); terms the villager loses on are done for the day once
+  dealt (`already traded`), so a lucky yes can't be repeated. A fair or better deal's held yes can be had
+  again, each time within the limits (Steering 04:35Z).
+- **The spoken answer:** the offer takes a line's place (`offered`, the listening hold, a `spoken` occasion
+  that carries the offer), and the villager answers on the next tick whatever the talk pacing. Its prompt
+  (`offer_tail`, `offer_choice`) states the offer and the answer already made; the reply's schema is say-3's
+  (`says`, `next`), with no answer to pick, so a failed or odd reply changes nothing but the words. The answer
+  prompt's holdings line names what the hands hold (`carry_words`: "5 food, 30 coin and a flower"; empty hands
+  read "5 food and 30 coin", as before), so "your flower" or "your hands are full" rests on a fact it shows.
+- **Gone:** if the one who offered is out of reach when the villager would answer, no answer is asked for and
+  nothing is said: a `deal` with `ok: false` and `why: "gone"` cites the offer and the decision (Steering
+  04:50Z). The terms stay open for the day.
+- **The deal:** after a yes the limits are checked live and one `deal` moves both sides, citing the offer,
+  the answer and the decision; its actor is the one who offered. A yes that can no longer be had writes
+  `deal` with `ok: false` and its reason, so a yes never fizzles silently. A rolled no writes no deal. A
+  trade warms the player to the villager by 50; both remember it.
+- **No player, no offer:** a world with no player, or a played session with no offer in it and nothing
+  handed over, differs from things-1's log only in the genesis `engine` field (tested against the hash
+  things-1's own code wrote).
+- **Invariants** (`invariants._offer_deal_violations`, `Things.see`): an offer's deal is well formed, cites
+  what it must (the act for a gift; the offer, the receiver's answer and its earlier yes with roll under
+  limit otherwise), and things move only out of hands that hold them.
+- **The client:** a villager's row and the E list carry "offer a trade", which opens the Trade panel
+  (`offer_box.gd`, `main.gd`): count boxes for what you give and what you want, a line saying what will be
+  sent, and Offer. The feed words the offer, the answer, the deal or why nothing moved.
+- **Tests:** `tests/test_deal.py` (39); the things row check in `tests/test_things.py` now also reads the affinity line and `client/godot/tests/test_offer.gd`.
 
 ## Bars (the build must pass these before review)
 1. **No-player worlds unchanged:** for seeds 1 to 3 at 100 villagers over 3 days, the log is identical

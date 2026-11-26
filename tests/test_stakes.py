@@ -428,8 +428,9 @@ def test_viewing_a_sick_villager_leaves_the_world_unchanged():
     sim._sick_ask(a)
     before = sim.state_hash()
     v = inhabitant.view(sim, a["id"])
-    # reach-1: `hail` is in the offer when someone walks by in sight; it is the view's, not the sickness's
-    assert v["occasion"]["why"] == "sick" and set(v["offer"]) - {"hail"} == {"work", "home"}
+    # reach-1: `hail` is in the offer when someone walks by in sight; it is the view's, not the sickness's.
+    # deal-1: so is `offer`, with someone awake in reach: a sick body can still speak and trade, as it can hand a thing
+    assert v["occasion"]["why"] == "sick" and set(v["offer"]) - {"hail", "offer"} == {"work", "home"}
     for o in sim.state["agents"]:
         inhabitant.view(sim, o["id"])
     assert sim.state_hash() == before

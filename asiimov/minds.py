@@ -58,6 +58,9 @@ class StubMind:
             yes = v["answers"] == ["yes"] or len(v["answers"]) > 1 and v["traits"]["agreeableness"] > 500
             out = {"answer": "yes" if yes else "no", "says": "Here, take one." if yes else "I can't spare any.",
                    "next": "carry_on"}
+        elif req.kind == "answer" and v.get("trade"):  # deal-1: a keyed offer's answer is the world's; it words it
+            yes = v["trade"]["answer"] == "yes"
+            out = {"says": "All right, it's a deal." if yes else "No, I'll keep what I have.", "next": "carry_on"}
         elif req.kind == "decide":  # text-1: the private decision, by agreeableness as its chosen answers are
             out = {"answer": "yes" if v["traits"]["agreeableness"] > 500 else "no"}
         elif req.kind == "answer" and v.get("gives"):  # text-1: a stub can't hear an ask, so a typed line gets nothing
@@ -195,7 +198,8 @@ class ScriptMind(StubMind):
     def decide(self, req: MindRequest) -> MindReply:
         reply = super().decide(req)
         heard = req.kind == "answer" and self.hear is not None and bool(req.view.get("gives"))
-        if heard or (req.kind == "answer" and self.voice is not None):
+        if heard or (req.kind == "answer" and self.voice is not None and not req.view.get("trade")):
+            # (deal-1: a keyed offer has no line for the voice to answer; the stub's own words say its answer)
             out = json.loads(reply.raw_output)
             sampling, model = dict(reply.sampling), self.model
             if heard:  # it only hears: the roll already decided, and the engine gives only what it offered
